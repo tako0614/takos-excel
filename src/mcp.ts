@@ -1,6 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import * as store from "./spreadsheet-store.ts";
+import type { SpreadsheetStore } from "./spreadsheet-store.ts";
 import { renderSheetToBuffer } from "./lib/grid-renderer.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -14,7 +14,7 @@ function json(v: unknown) {
   return text(JSON.stringify(v, null, 2));
 }
 
-export function createMcpServer(): McpServer {
+export function createMcpServer(store: SpreadsheetStore): McpServer {
   const mcp = new McpServer({
     name: "takos-excel",
     version: "0.1.0",
@@ -29,7 +29,7 @@ export function createMcpServer(): McpServer {
     "List all spreadsheets",
     {},
     async (_args: Any) => {
-      return json(store.listSpreadsheets());
+      return json(await store.listSpreadsheets());
     },
   );
 
@@ -38,7 +38,7 @@ export function createMcpServer(): McpServer {
     "Create a new spreadsheet",
     { title: z.string().describe("Spreadsheet title") },
     async (args: Any) => {
-      const id = store.createSpreadsheet(args.title);
+      const id = await store.createSpreadsheet(args.title);
       return json({ id });
     },
   );
@@ -48,7 +48,7 @@ export function createMcpServer(): McpServer {
     "Get spreadsheet info (metadata + sheet names)",
     { id: z.string().describe("Spreadsheet ID") },
     async (args: Any) => {
-      const ss = store.getSpreadsheet(args.id);
+      const ss = await store.getSpreadsheet(args.id);
       return json({
         id: ss.id,
         title: ss.title,
@@ -64,7 +64,7 @@ export function createMcpServer(): McpServer {
     "Delete a spreadsheet",
     { id: z.string().describe("Spreadsheet ID") },
     async (args: Any) => {
-      store.deleteSpreadsheet(args.id);
+      await store.deleteSpreadsheet(args.id);
       return text("Deleted");
     },
   );
@@ -77,7 +77,7 @@ export function createMcpServer(): McpServer {
       title: z.string().describe("New title"),
     },
     async (args: Any) => {
-      store.setSpreadsheetTitle(args.id, args.title);
+      await store.setSpreadsheetTitle(args.id, args.title);
       return text("OK");
     },
   );
@@ -94,7 +94,7 @@ export function createMcpServer(): McpServer {
       name: z.string().optional().describe("Tab name (auto-generated if omitted)"),
     },
     async (args: Any) => {
-      const sheetId = store.addTab(args.spreadsheetId, args.name);
+      const sheetId = await store.addTab(args.spreadsheetId, args.name);
       return json({ sheetId });
     },
   );
@@ -107,7 +107,7 @@ export function createMcpServer(): McpServer {
       sheetId: z.string().describe("Sheet tab ID"),
     },
     async (args: Any) => {
-      store.removeTab(args.spreadsheetId, args.sheetId);
+      await store.removeTab(args.spreadsheetId, args.sheetId);
       return text("Removed");
     },
   );
@@ -121,7 +121,7 @@ export function createMcpServer(): McpServer {
       name: z.string().describe("New tab name"),
     },
     async (args: Any) => {
-      store.renameTab(args.spreadsheetId, args.sheetId, args.name);
+      await store.renameTab(args.spreadsheetId, args.sheetId, args.name);
       return text("OK");
     },
   );
@@ -139,7 +139,7 @@ export function createMcpServer(): McpServer {
       cell: z.string().describe('Cell address, e.g. "A1"'),
     },
     async (args: Any) => {
-      return json(store.getCell(args.spreadsheetId, args.sheetId, args.cell));
+      return json(await store.getCell(args.spreadsheetId, args.sheetId, args.cell));
     },
   );
 
@@ -153,7 +153,7 @@ export function createMcpServer(): McpServer {
       value: z.string().describe('Cell value or formula, e.g. "42" or "=SUM(A1:A10)"'),
     },
     async (args: Any) => {
-      store.setCell(args.spreadsheetId, args.sheetId, args.cell, args.value);
+      await store.setCell(args.spreadsheetId, args.sheetId, args.cell, args.value);
       return text("OK");
     },
   );
@@ -167,7 +167,7 @@ export function createMcpServer(): McpServer {
       range: z.string().describe('Range, e.g. "A1:C10"'),
     },
     async (args: Any) => {
-      return json(store.getRange(args.spreadsheetId, args.sheetId, args.range));
+      return json(await store.getRange(args.spreadsheetId, args.sheetId, args.range));
     },
   );
 
@@ -183,7 +183,7 @@ export function createMcpServer(): McpServer {
         .describe("2D array of string values"),
     },
     async (args: Any) => {
-      store.setRange(
+      await store.setRange(
         args.spreadsheetId,
         args.sheetId,
         args.startCell,
@@ -202,7 +202,7 @@ export function createMcpServer(): McpServer {
       range: z.string().describe('Range, e.g. "A1:C10"'),
     },
     async (args: Any) => {
-      store.clearRange(args.spreadsheetId, args.sheetId, args.range);
+      await store.clearRange(args.spreadsheetId, args.sheetId, args.range);
       return text("Cleared");
     },
   );
@@ -230,7 +230,7 @@ export function createMcpServer(): McpServer {
       format: z.object(formatSchema).describe("Format options"),
     },
     async (args: Any) => {
-      store.formatCell(
+      await store.formatCell(
         args.spreadsheetId,
         args.sheetId,
         args.cell,
@@ -250,7 +250,7 @@ export function createMcpServer(): McpServer {
       format: z.object(formatSchema).describe("Format options"),
     },
     async (args: Any) => {
-      store.formatRange(
+      await store.formatRange(
         args.spreadsheetId,
         args.sheetId,
         args.range,
@@ -273,7 +273,7 @@ export function createMcpServer(): McpServer {
       formula: z.string().describe('Formula, e.g. "=SUM(A1:A10)"'),
     },
     async (args: Any) => {
-      const result = store.evaluate(
+      const result = await store.evaluate(
         args.spreadsheetId,
         args.sheetId,
         args.formula,
@@ -292,7 +292,7 @@ export function createMcpServer(): McpServer {
     },
     async (args: Any) => {
       return json(
-        store.getComputed(args.spreadsheetId, args.sheetId, args.range),
+        await store.getComputed(args.spreadsheetId, args.sheetId, args.range),
       );
     },
   );
@@ -311,7 +311,7 @@ export function createMcpServer(): McpServer {
       width: z.number().describe("Width in pixels"),
     },
     async (args: Any) => {
-      store.setColumnWidth(
+      await store.setColumnWidth(
         args.spreadsheetId,
         args.sheetId,
         args.column,
@@ -331,7 +331,7 @@ export function createMcpServer(): McpServer {
       height: z.number().describe("Height in pixels"),
     },
     async (args: Any) => {
-      store.setRowHeight(
+      await store.setRowHeight(
         args.spreadsheetId,
         args.sheetId,
         args.row,
@@ -370,7 +370,7 @@ export function createMcpServer(): McpServer {
     },
     async (args: Any) => {
       try {
-        const ss = store.getSpreadsheet(args.spreadsheetId);
+        const ss = await store.getSpreadsheet(args.spreadsheetId);
         const sheet = ss.sheets.find((s) => s.id === args.sheetId);
         if (!sheet) return text(`Sheet not found: ${args.sheetId}`);
 
@@ -408,7 +408,7 @@ export function createMcpServer(): McpServer {
       sheetId: z.string().describe("Sheet tab ID"),
     },
     async (args: Any) => {
-      return text(store.exportCsv(args.spreadsheetId, args.sheetId));
+      return text(await store.exportCsv(args.spreadsheetId, args.sheetId));
     },
   );
 
@@ -419,7 +419,7 @@ export function createMcpServer(): McpServer {
       spreadsheetId: z.string().describe("Spreadsheet ID"),
     },
     async (args: Any) => {
-      return text(store.exportJson(args.spreadsheetId));
+      return text(await store.exportJson(args.spreadsheetId));
     },
   );
 

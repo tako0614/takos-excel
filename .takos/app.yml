@@ -26,17 +26,17 @@ spec:
       target: web
       path: /
 
-  resources:
-    sheet-db:
-      type: d1
-      binding: DB
-    sheet-storage:
-      type: r2
-      binding: STORAGE
+  takos:
+    scopes:
+      - files:read
+      - files:write
 
   env:
+    required:
+      - TAKOS_ACCESS_TOKEN
     inject:
       APP_URL: "{{routes.web.url}}"
+      TAKOS_API_URL: "{{takos.apiUrl}}"
 
   mcpServers:
     takos-excel:

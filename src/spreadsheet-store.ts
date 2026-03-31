@@ -1,7 +1,12 @@
 /**
- * In-memory spreadsheet store for the MCP server.
- * Mirrors the localStorage-based storage.ts but operates purely in memory
- * so it can run in a Deno server context without browser APIs.
+ * SpreadsheetStore backed by the takos platform storage API.
+ *
+ * Each spreadsheet is stored as a JSON file under a `/takos-excel/` folder:
+ *   - File name: `{id}.json`
+ *   - Content: full Spreadsheet object serialised as JSON
+ *
+ * The store keeps an in-memory cache that is hydrated on first access
+ * and written through on every mutation.
  */
 import type {
   Spreadsheet,
@@ -23,159 +28,461 @@ import {
   getCellValue,
   setCellValue,
 } from "./lib/formula.ts";
+import type { TakosStorageClient } from "./lib/takos-storage.ts";
+
+const FOLDER_NAME = "takos-excel";
 
 // ---------------------------------------------------------------------------
-// Store
+// SpreadsheetStore
 // ---------------------------------------------------------------------------
 
-const spreadsheets = new Map<string, Spreadsheet>();
+export class SpreadsheetStore {
+  private client: TakosStorageClient;
+  /** spreadsheet.id -> { spreadsheet, fileId } */
+  private cache = new Map<string, { ss: Spreadsheet; fileId: string }>();
+  private folderId: string | null = null;
+  private initialized = false;
 
-function now(): string {
-  return new Date().toISOString();
-}
-
-function touch(ss: Spreadsheet): void {
-  ss.updatedAt = now();
-}
-
-// ---------------------------------------------------------------------------
-// Spreadsheet CRUD
-// ---------------------------------------------------------------------------
-
-export function listSpreadsheets(): {
-  id: string;
-  title: string;
-  sheetCount: number;
-  updatedAt: string;
-}[] {
-  return [...spreadsheets.values()].map((ss) => ({
-    id: ss.id,
-    title: ss.title,
-    sheetCount: ss.sheets.length,
-    updatedAt: ss.updatedAt,
-  }));
-}
-
-export function createSpreadsheet(title: string): string {
-  const id = crypto.randomUUID();
-  const sheetId = crypto.randomUUID();
-  const defaultSheet: Sheet = {
-    id: sheetId,
-    name: "Sheet1",
-    cells: {},
-    colWidths: {},
-    rowHeights: {},
-  };
-  const ts = now();
-  spreadsheets.set(id, {
-    id,
-    title,
-    sheets: [defaultSheet],
-    activeSheetId: sheetId,
-    createdAt: ts,
-    updatedAt: ts,
-  });
-  return id;
-}
-
-export function getSpreadsheet(id: string): Spreadsheet {
-  const ss = spreadsheets.get(id);
-  if (!ss) throw new Error(`Spreadsheet not found: ${id}`);
-  return ss;
-}
-
-export function deleteSpreadsheet(id: string): void {
-  if (!spreadsheets.has(id))
-    throw new Error(`Spreadsheet not found: ${id}`);
-  spreadsheets.delete(id);
-}
-
-export function setSpreadsheetTitle(id: string, title: string): void {
-  const ss = getSpreadsheet(id);
-  ss.title = title;
-  touch(ss);
-}
-
-// ---------------------------------------------------------------------------
-// Sheet tab helpers
-// ---------------------------------------------------------------------------
-
-function getSheet(spreadsheetId: string, sheetId: string): { ss: Spreadsheet; sheet: Sheet } {
-  const ss = getSpreadsheet(spreadsheetId);
-  const sheet = ss.sheets.find((s) => s.id === sheetId);
-  if (!sheet) throw new Error(`Sheet not found: ${sheetId}`);
-  return { ss, sheet };
-}
-
-export function addTab(spreadsheetId: string, name?: string): string {
-  const ss = getSpreadsheet(spreadsheetId);
-  const sheetId = crypto.randomUUID();
-  const tabName = name ?? `Sheet${ss.sheets.length + 1}`;
-  ss.sheets.push({
-    id: sheetId,
-    name: tabName,
-    cells: {},
-    colWidths: {},
-    rowHeights: {},
-  });
-  touch(ss);
-  return sheetId;
-}
-
-export function removeTab(spreadsheetId: string, sheetId: string): void {
-  const ss = getSpreadsheet(spreadsheetId);
-  if (ss.sheets.length <= 1) throw new Error("Cannot remove the last sheet tab");
-  ss.sheets = ss.sheets.filter((s) => s.id !== sheetId);
-  if (ss.activeSheetId === sheetId) {
-    ss.activeSheetId = ss.sheets[0].id;
+  constructor(client: TakosStorageClient) {
+    this.client = client;
   }
-  touch(ss);
-}
 
-export function renameTab(
-  spreadsheetId: string,
-  sheetId: string,
-  name: string,
-): void {
-  const { ss, sheet } = getSheet(spreadsheetId, sheetId);
-  sheet.name = name;
-  touch(ss);
+  // -----------------------------------------------------------------------
+  // Initialization
+  // -----------------------------------------------------------------------
+
+  private async ensureInitialized(): Promise<void> {
+    if (this.initialized) return;
+
+    const files = await this.client.list();
+    const folder = files.find(
+      (f) => f.type === "folder" && f.name === FOLDER_NAME,
+    );
+    if (folder) {
+      this.folderId = folder.id;
+    } else {
+      const created = await this.client.createFolder(FOLDER_NAME);
+      this.folderId = created.id;
+    }
+
+    const allFiles = await this.client.list(FOLDER_NAME);
+    for (const file of allFiles) {
+      if (file.type !== "file" || !file.name.endsWith(".json")) continue;
+      try {
+        const raw = await this.client.getContent(file.id);
+        const ss = JSON.parse(raw) as Spreadsheet;
+        this.cache.set(ss.id, { ss, fileId: file.id });
+      } catch {
+        console.warn(
+          `[takos-excel] Skipping unreadable file: ${file.name}`,
+        );
+      }
+    }
+
+    this.initialized = true;
+  }
+
+  private async persist(id: string): Promise<void> {
+    const entry = this.cache.get(id);
+    if (!entry) return;
+    await this.client.putContent(entry.fileId, JSON.stringify(entry.ss));
+  }
+
+  private touch(ss: Spreadsheet): void {
+    ss.updatedAt = new Date().toISOString();
+  }
+
+  // -----------------------------------------------------------------------
+  // Spreadsheet CRUD
+  // -----------------------------------------------------------------------
+
+  async listSpreadsheets(): Promise<
+    { id: string; title: string; sheetCount: number; updatedAt: string }[]
+  > {
+    await this.ensureInitialized();
+    return [...this.cache.values()].map((e) => ({
+      id: e.ss.id,
+      title: e.ss.title,
+      sheetCount: e.ss.sheets.length,
+      updatedAt: e.ss.updatedAt,
+    }));
+  }
+
+  async createSpreadsheet(title: string): Promise<string> {
+    await this.ensureInitialized();
+    const id = crypto.randomUUID();
+    const sheetId = crypto.randomUUID();
+    const defaultSheet: Sheet = {
+      id: sheetId,
+      name: "Sheet1",
+      cells: {},
+      colWidths: {},
+      rowHeights: {},
+    };
+    const ts = new Date().toISOString();
+    const ss: Spreadsheet = {
+      id,
+      title,
+      sheets: [defaultSheet],
+      activeSheetId: sheetId,
+      createdAt: ts,
+      updatedAt: ts,
+    };
+
+    const file = await this.client.create(
+      `${id}.json`,
+      this.folderId ?? undefined,
+    );
+    await this.client.putContent(file.id, JSON.stringify(ss));
+    this.cache.set(id, { ss, fileId: file.id });
+    return id;
+  }
+
+  async getSpreadsheet(id: string): Promise<Spreadsheet> {
+    await this.ensureInitialized();
+    const entry = this.cache.get(id);
+    if (!entry) throw new Error(`Spreadsheet not found: ${id}`);
+    return entry.ss;
+  }
+
+  async deleteSpreadsheet(id: string): Promise<void> {
+    await this.ensureInitialized();
+    const entry = this.cache.get(id);
+    if (!entry) throw new Error(`Spreadsheet not found: ${id}`);
+    await this.client.delete(entry.fileId);
+    this.cache.delete(id);
+  }
+
+  async setSpreadsheetTitle(id: string, title: string): Promise<void> {
+    const ss = await this.getSpreadsheet(id);
+    ss.title = title;
+    this.touch(ss);
+    await this.persist(id);
+  }
+
+  // -----------------------------------------------------------------------
+  // Sheet tab helpers
+  // -----------------------------------------------------------------------
+
+  private async getSheet(
+    spreadsheetId: string,
+    sheetId: string,
+  ): Promise<{ ss: Spreadsheet; sheet: Sheet }> {
+    const ss = await this.getSpreadsheet(spreadsheetId);
+    const sheet = ss.sheets.find((s) => s.id === sheetId);
+    if (!sheet) throw new Error(`Sheet not found: ${sheetId}`);
+    return { ss, sheet };
+  }
+
+  async addTab(spreadsheetId: string, name?: string): Promise<string> {
+    const ss = await this.getSpreadsheet(spreadsheetId);
+    const sheetId = crypto.randomUUID();
+    const tabName = name ?? `Sheet${ss.sheets.length + 1}`;
+    ss.sheets.push({
+      id: sheetId,
+      name: tabName,
+      cells: {},
+      colWidths: {},
+      rowHeights: {},
+    });
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+    return sheetId;
+  }
+
+  async removeTab(spreadsheetId: string, sheetId: string): Promise<void> {
+    const ss = await this.getSpreadsheet(spreadsheetId);
+    if (ss.sheets.length <= 1)
+      throw new Error("Cannot remove the last sheet tab");
+    ss.sheets = ss.sheets.filter((s) => s.id !== sheetId);
+    if (ss.activeSheetId === sheetId) {
+      ss.activeSheetId = ss.sheets[0].id;
+    }
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  async renameTab(
+    spreadsheetId: string,
+    sheetId: string,
+    name: string,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    sheet.name = name;
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  // -----------------------------------------------------------------------
+  // Cell operations
+  // -----------------------------------------------------------------------
+
+  async getCell(
+    spreadsheetId: string,
+    sheetId: string,
+    cell: CellAddress,
+  ): Promise<{
+    value: string;
+    computed: string;
+    format: CellFormat | undefined;
+  }> {
+    const { sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const data = sheet.cells[cell];
+    if (!data) return { value: "", computed: "", format: undefined };
+    return {
+      value: data.value,
+      computed: data.computed ?? data.value,
+      format: data.format,
+    };
+  }
+
+  async setCell(
+    spreadsheetId: string,
+    sheetId: string,
+    cell: CellAddress,
+    value: string,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    sheet.cells = setCellValue(sheet, cell, value);
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  async getRange(
+    spreadsheetId: string,
+    sheetId: string,
+    range: string,
+  ): Promise<string[][]> {
+    const { sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const { startCol, startRow, endCol, endRow } = parseRange(range);
+    const result: string[][] = [];
+    for (let r = startRow; r <= endRow; r++) {
+      const row: string[] = [];
+      for (let c = startCol; c <= endCol; c++) {
+        const addr = formatCellAddress(c, r);
+        const cell = sheet.cells[addr];
+        row.push(cell ? cell.value : "");
+      }
+      result.push(row);
+    }
+    return result;
+  }
+
+  async setRange(
+    spreadsheetId: string,
+    sheetId: string,
+    startCell: string,
+    values: string[][],
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const { col: sc, row: sr } = parseCellAddress(startCell);
+    for (let r = 0; r < values.length; r++) {
+      for (let c = 0; c < values[r].length; c++) {
+        const addr = formatCellAddress(sc + c, sr + r);
+        const existing = sheet.cells[addr];
+        sheet.cells[addr] = {
+          ...existing,
+          value: values[r][c],
+          format: existing?.format,
+        };
+      }
+    }
+    sheet.cells = evaluateSheet(sheet);
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  async clearRange(
+    spreadsheetId: string,
+    sheetId: string,
+    range: string,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const { startCol, startRow, endCol, endRow } = parseRange(range);
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const addr = formatCellAddress(c, r);
+        delete sheet.cells[addr];
+      }
+    }
+    sheet.cells = evaluateSheet(sheet);
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  async formatCell(
+    spreadsheetId: string,
+    sheetId: string,
+    cell: CellAddress,
+    format: CellFormat,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const existing = sheet.cells[cell];
+    sheet.cells[cell] = {
+      value: existing?.value ?? "",
+      computed: existing?.computed,
+      format: { ...(existing?.format ?? {}), ...format },
+    };
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  async formatRange(
+    spreadsheetId: string,
+    sheetId: string,
+    range: string,
+    format: CellFormat,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const { startCol, startRow, endCol, endRow } = parseRange(range);
+    for (let r = startRow; r <= endRow; r++) {
+      for (let c = startCol; c <= endCol; c++) {
+        const addr = formatCellAddress(c, r);
+        const existing = sheet.cells[addr];
+        sheet.cells[addr] = {
+          value: existing?.value ?? "",
+          computed: existing?.computed,
+          format: { ...(existing?.format ?? {}), ...format },
+        };
+      }
+    }
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  // -----------------------------------------------------------------------
+  // Formula & computation
+  // -----------------------------------------------------------------------
+
+  async evaluate(
+    spreadsheetId: string,
+    sheetId: string,
+    formula: string,
+  ): Promise<string> {
+    const { sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const hf = getEngine();
+    const hfSheetId = syncSheetToEngine(sheet);
+
+    const tmpRow = 9999;
+    const tmpCol = 99;
+    try {
+      hf.setCellContents({ sheet: hfSheetId, row: tmpRow, col: tmpCol }, [
+        [formula],
+      ]);
+      const result = hf.getCellValue({
+        sheet: hfSheetId,
+        row: tmpRow,
+        col: tmpCol,
+      });
+      if (result !== null && result !== undefined) {
+        if (typeof result === "object" && "type" in result) {
+          return "#ERROR!";
+        }
+        return String(result);
+      }
+      return "";
+    } catch {
+      return "#ERROR!";
+    }
+  }
+
+  async getComputed(
+    spreadsheetId: string,
+    sheetId: string,
+    range: string,
+  ): Promise<string[][]> {
+    const { sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const cells = evaluateSheet(sheet);
+    const { startCol, startRow, endCol, endRow } = parseRange(range);
+    const result: string[][] = [];
+    for (let r = startRow; r <= endRow; r++) {
+      const row: string[] = [];
+      for (let c = startCol; c <= endCol; c++) {
+        const addr = formatCellAddress(c, r);
+        const cell = cells[addr];
+        row.push(cell ? (cell.computed ?? cell.value) : "");
+      }
+      result.push(row);
+    }
+    return result;
+  }
+
+  // -----------------------------------------------------------------------
+  // Column / Row sizing
+  // -----------------------------------------------------------------------
+
+  async setColumnWidth(
+    spreadsheetId: string,
+    sheetId: string,
+    column: string,
+    width: number,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const colIndex = letterToColumn(column);
+    sheet.colWidths[colIndex] = width;
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  async setRowHeight(
+    spreadsheetId: string,
+    sheetId: string,
+    row: number,
+    height: number,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    sheet.rowHeights[row] = height;
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  // -----------------------------------------------------------------------
+  // Export
+  // -----------------------------------------------------------------------
+
+  async exportCsv(spreadsheetId: string, sheetId: string): Promise<string> {
+    const { sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const cells = evaluateSheet(sheet);
+
+    let maxRow = 0;
+    let maxCol = 0;
+    for (const addr of Object.keys(cells)) {
+      try {
+        const { col, row } = parseCellAddress(addr);
+        maxRow = Math.max(maxRow, row);
+        maxCol = Math.max(maxCol, col);
+      } catch {
+        // skip invalid
+      }
+    }
+
+    const lines: string[] = [];
+    for (let r = 0; r <= maxRow; r++) {
+      const cols: string[] = [];
+      for (let c = 0; c <= maxCol; c++) {
+        const addr = formatCellAddress(c, r);
+        const cell = cells[addr];
+        let val = cell ? (cell.computed ?? cell.value) : "";
+        if (val.includes(",") || val.includes("\n") || val.includes('"')) {
+          val = '"' + val.replace(/"/g, '""') + '"';
+        }
+        cols.push(val);
+      }
+      lines.push(cols.join(","));
+    }
+    return lines.join("\n");
+  }
+
+  async exportJson(spreadsheetId: string): Promise<string> {
+    const ss = await this.getSpreadsheet(spreadsheetId);
+    return JSON.stringify(ss, null, 2);
+  }
 }
 
 // ---------------------------------------------------------------------------
-// Cell operations
+// Utility (private)
 // ---------------------------------------------------------------------------
 
-export function getCell(
-  spreadsheetId: string,
-  sheetId: string,
-  cell: CellAddress,
-): { value: string; computed: string; format: CellFormat | undefined } {
-  const { sheet } = getSheet(spreadsheetId, sheetId);
-  const data = sheet.cells[cell];
-  if (!data) return { value: "", computed: "", format: undefined };
-  return {
-    value: data.value,
-    computed: data.computed ?? data.value,
-    format: data.format,
-  };
-}
-
-export function setCell(
-  spreadsheetId: string,
-  sheetId: string,
-  cell: CellAddress,
-  value: string,
-): void {
-  const { ss, sheet } = getSheet(spreadsheetId, sheetId);
-  // Use the formula engine's setCellValue which re-evaluates
-  sheet.cells = setCellValue(sheet, cell, value);
-  touch(ss);
-}
-
-/**
- * Parse a range string like "A1:C10" into start/end col/row (0-based).
- */
 function parseRange(range: string): {
   startCol: number;
   startRow: number;
@@ -192,230 +499,4 @@ function parseRange(range: string): {
     endCol: Math.max(start.col, end.col),
     endRow: Math.max(start.row, end.row),
   };
-}
-
-export function getRange(
-  spreadsheetId: string,
-  sheetId: string,
-  range: string,
-): string[][] {
-  const { sheet } = getSheet(spreadsheetId, sheetId);
-  const { startCol, startRow, endCol, endRow } = parseRange(range);
-  const result: string[][] = [];
-  for (let r = startRow; r <= endRow; r++) {
-    const row: string[] = [];
-    for (let c = startCol; c <= endCol; c++) {
-      const addr = formatCellAddress(c, r);
-      const cell = sheet.cells[addr];
-      row.push(cell ? cell.value : "");
-    }
-    result.push(row);
-  }
-  return result;
-}
-
-export function setRange(
-  spreadsheetId: string,
-  sheetId: string,
-  startCell: string,
-  values: string[][],
-): void {
-  const { ss, sheet } = getSheet(spreadsheetId, sheetId);
-  const { col: sc, row: sr } = parseCellAddress(startCell);
-  for (let r = 0; r < values.length; r++) {
-    for (let c = 0; c < values[r].length; c++) {
-      const addr = formatCellAddress(sc + c, sr + r);
-      const existing = sheet.cells[addr];
-      sheet.cells[addr] = {
-        ...existing,
-        value: values[r][c],
-        format: existing?.format,
-      };
-    }
-  }
-  // Re-evaluate entire sheet
-  sheet.cells = evaluateSheet(sheet);
-  touch(ss);
-}
-
-export function clearRange(
-  spreadsheetId: string,
-  sheetId: string,
-  range: string,
-): void {
-  const { ss, sheet } = getSheet(spreadsheetId, sheetId);
-  const { startCol, startRow, endCol, endRow } = parseRange(range);
-  for (let r = startRow; r <= endRow; r++) {
-    for (let c = startCol; c <= endCol; c++) {
-      const addr = formatCellAddress(c, r);
-      delete sheet.cells[addr];
-    }
-  }
-  sheet.cells = evaluateSheet(sheet);
-  touch(ss);
-}
-
-export function formatCell(
-  spreadsheetId: string,
-  sheetId: string,
-  cell: CellAddress,
-  format: CellFormat,
-): void {
-  const { ss, sheet } = getSheet(spreadsheetId, sheetId);
-  const existing = sheet.cells[cell];
-  sheet.cells[cell] = {
-    value: existing?.value ?? "",
-    computed: existing?.computed,
-    format: { ...(existing?.format ?? {}), ...format },
-  };
-  touch(ss);
-}
-
-export function formatRange(
-  spreadsheetId: string,
-  sheetId: string,
-  range: string,
-  format: CellFormat,
-): void {
-  const { ss, sheet } = getSheet(spreadsheetId, sheetId);
-  const { startCol, startRow, endCol, endRow } = parseRange(range);
-  for (let r = startRow; r <= endRow; r++) {
-    for (let c = startCol; c <= endCol; c++) {
-      const addr = formatCellAddress(c, r);
-      const existing = sheet.cells[addr];
-      sheet.cells[addr] = {
-        value: existing?.value ?? "",
-        computed: existing?.computed,
-        format: { ...(existing?.format ?? {}), ...format },
-      };
-    }
-  }
-  touch(ss);
-}
-
-// ---------------------------------------------------------------------------
-// Formula & computation
-// ---------------------------------------------------------------------------
-
-export function evaluate(
-  spreadsheetId: string,
-  sheetId: string,
-  formula: string,
-): string {
-  const { sheet } = getSheet(spreadsheetId, sheetId);
-  // Sync sheet state and evaluate the formula in an empty cell
-  const hf = getEngine();
-  const hfSheetId = syncSheetToEngine(sheet);
-
-  // Find an unused cell far away
-  const tmpRow = 9999;
-  const tmpCol = 99;
-  try {
-    hf.setCellContents({ sheet: hfSheetId, row: tmpRow, col: tmpCol }, [
-      [formula],
-    ]);
-    const result = hf.getCellValue({ sheet: hfSheetId, row: tmpRow, col: tmpCol });
-    if (result !== null && result !== undefined) {
-      if (typeof result === "object" && "type" in result) {
-        return "#ERROR!";
-      }
-      return String(result);
-    }
-    return "";
-  } catch {
-    return "#ERROR!";
-  }
-}
-
-export function getComputed(
-  spreadsheetId: string,
-  sheetId: string,
-  range: string,
-): string[][] {
-  const { sheet } = getSheet(spreadsheetId, sheetId);
-  // Re-evaluate to ensure computed values are current
-  const cells = evaluateSheet(sheet);
-  const { startCol, startRow, endCol, endRow } = parseRange(range);
-  const result: string[][] = [];
-  for (let r = startRow; r <= endRow; r++) {
-    const row: string[] = [];
-    for (let c = startCol; c <= endCol; c++) {
-      const addr = formatCellAddress(c, r);
-      const cell = cells[addr];
-      row.push(cell ? (cell.computed ?? cell.value) : "");
-    }
-    result.push(row);
-  }
-  return result;
-}
-
-// ---------------------------------------------------------------------------
-// Column / Row sizing
-// ---------------------------------------------------------------------------
-
-export function setColumnWidth(
-  spreadsheetId: string,
-  sheetId: string,
-  column: string,
-  width: number,
-): void {
-  const { ss, sheet } = getSheet(spreadsheetId, sheetId);
-  const colIndex = letterToColumn(column);
-  sheet.colWidths[colIndex] = width;
-  touch(ss);
-}
-
-export function setRowHeight(
-  spreadsheetId: string,
-  sheetId: string,
-  row: number,
-  height: number,
-): void {
-  const { ss, sheet } = getSheet(spreadsheetId, sheetId);
-  sheet.rowHeights[row] = height;
-  touch(ss);
-}
-
-// ---------------------------------------------------------------------------
-// Export
-// ---------------------------------------------------------------------------
-
-export function exportCsv(spreadsheetId: string, sheetId: string): string {
-  const { sheet } = getSheet(spreadsheetId, sheetId);
-  const cells = evaluateSheet(sheet);
-
-  // Find the data bounds
-  let maxRow = 0;
-  let maxCol = 0;
-  for (const addr of Object.keys(cells)) {
-    try {
-      const { col, row } = parseCellAddress(addr);
-      maxRow = Math.max(maxRow, row);
-      maxCol = Math.max(maxCol, col);
-    } catch {
-      // skip invalid
-    }
-  }
-
-  const lines: string[] = [];
-  for (let r = 0; r <= maxRow; r++) {
-    const cols: string[] = [];
-    for (let c = 0; c <= maxCol; c++) {
-      const addr = formatCellAddress(c, r);
-      const cell = cells[addr];
-      let val = cell ? (cell.computed ?? cell.value) : "";
-      // Escape CSV: if contains comma, newline, or quote, wrap in quotes
-      if (val.includes(",") || val.includes("\n") || val.includes('"')) {
-        val = '"' + val.replace(/"/g, '""') + '"';
-      }
-      cols.push(val);
-    }
-    lines.push(cols.join(","));
-  }
-  return lines.join("\n");
-}
-
-export function exportJson(spreadsheetId: string): string {
-  const ss = getSpreadsheet(spreadsheetId);
-  return JSON.stringify(ss, null, 2);
 }
