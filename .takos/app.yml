@@ -63,5 +63,6 @@ spec:
         - sheet_get_computed
         - sheet_set_column_width
         - sheet_set_row_height
+        - sheet_screenshot
         - sheet_export_csv
         - sheet_export_json

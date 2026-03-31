@@ -1,6 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import * as store from "./spreadsheet-store.ts";
+import { renderSheetToBuffer } from "./lib/grid-renderer.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
@@ -337,6 +338,61 @@ export function createMcpServer(): McpServer {
         args.height,
       );
       return text("OK");
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // Screenshot
+  // -----------------------------------------------------------------------
+
+  mcp.tool(
+    "sheet_screenshot",
+    "Render a spreadsheet sheet as a PNG image showing the grid with values",
+    {
+      spreadsheetId: z.string().describe("Spreadsheet ID"),
+      sheetId: z.string().describe("Sheet tab ID"),
+      rows: z
+        .number()
+        .optional()
+        .describe("Number of rows to show (default: 20)"),
+      cols: z
+        .number()
+        .optional()
+        .describe("Number of columns to show (default: 10)"),
+      width: z
+        .number()
+        .optional()
+        .describe("Image width in pixels (default: 1200)"),
+      height: z
+        .number()
+        .optional()
+        .describe("Image height in pixels (default: 800)"),
+    },
+    async (args: Any) => {
+      try {
+        const ss = store.getSpreadsheet(args.spreadsheetId);
+        const sheet = ss.sheets.find((s) => s.id === args.sheetId);
+        if (!sheet) return text(`Sheet not found: ${args.sheetId}`);
+
+        const buf = renderSheetToBuffer(sheet, {
+          rows: args.rows,
+          cols: args.cols,
+          width: args.width,
+          height: args.height,
+        });
+        const base64 = buf.toString("base64");
+        return {
+          content: [
+            {
+              type: "image" as const,
+              data: base64,
+              mimeType: "image/png",
+            },
+          ],
+        };
+      } catch (e) {
+        return text(`Failed to render sheet: ${String(e)}`);
+      }
     },
   );
 
