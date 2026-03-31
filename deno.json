@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "jsx": "preserve",
+    "jsxImportSource": "solid-js",
+    "lib": ["dom", "dom.iterable", "deno.window"]
+  },
+  "imports": {
+    "solid-js": "npm:solid-js@^1.9.0",
+    "@solidjs/router": "npm:@solidjs/router@^0.15.0",
+    "vite-plugin-solid": "npm:vite-plugin-solid@^2.11.0",
+    "jotai": "npm:jotai@^2.18.0",
+    "solid-jotai": "npm:solid-jotai@^0.3.0",
+    "lucide-solid": "npm:lucide-solid@^0.554.0",
+    "vite": "npm:vite@^6.4.0",
+    "tailwindcss": "npm:tailwindcss@^4.1.18",
+    "@tailwindcss/vite": "npm:@tailwindcss/vite@^4.1.18",
+    "hyperformula": "npm:hyperformula@^2.7.0"
+  },
+  "tasks": {
+    "dev": "deno run -A npm:vite --port 3003",
+    "build": "deno run -A npm:vite build",
+    "preview": "deno run -A npm:vite preview"
+  }
+}

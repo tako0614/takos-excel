@@ -1,0 +1,39 @@
+apiVersion: takos.dev/v1alpha1
+kind: App
+metadata:
+  name: takos-excel
+spec:
+  version: "0.1.0"
+  description: Spreadsheet editor (Google Sheets alternative)
+  category: app
+  tags:
+    - excel
+    - spreadsheet
+    - editor
+    - formula
+
+  workers:
+    web:
+      build:
+        fromWorkflow:
+          path: .takos/workflows/deploy.yml
+          job: build-web
+          artifact: web
+          artifactPath: dist
+
+  routes:
+    - name: web
+      target: web
+      path: /
+
+  resources:
+    sheet-db:
+      type: d1
+      binding: DB
+    sheet-storage:
+      type: r2
+      binding: STORAGE
+
+  env:
+    inject:
+      APP_URL: "{{routes.web.url}}"
