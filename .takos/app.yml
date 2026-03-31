@@ -37,3 +37,31 @@ spec:
   env:
     inject:
       APP_URL: "{{routes.web.url}}"
+
+  mcpServers:
+    takos-excel:
+      command: deno
+      args: ["task", "mcp"]
+      cwd: "{{root}}"
+      tools:
+        - sheet_list
+        - sheet_create
+        - sheet_get
+        - sheet_delete
+        - sheet_set_title
+        - sheet_add_tab
+        - sheet_remove_tab
+        - sheet_rename_tab
+        - sheet_get_cell
+        - sheet_set_cell
+        - sheet_get_range
+        - sheet_set_range
+        - sheet_clear_range
+        - sheet_format_cell
+        - sheet_format_range
+        - sheet_evaluate
+        - sheet_get_computed
+        - sheet_set_column_width
+        - sheet_set_row_height
+        - sheet_export_csv
+        - sheet_export_json
