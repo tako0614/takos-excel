@@ -1,0 +1,10 @@
+name: deploy
+jobs:
+  build-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build spreadsheet web app
+        run: deno task build
+    artifacts:
+      web:
+        path: dist

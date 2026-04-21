@@ -16,7 +16,7 @@ export interface StorageFile {
   id: string;
   name: string;
   parentId?: string;
-  type: 'file' | 'folder';
+  type: "file" | "folder";
   size?: number;
   createdAt: string;
   updatedAt: string;
@@ -40,24 +40,29 @@ export function createTakosStorageClient(
 ): TakosStorageClient {
   const baseUrl = `${apiUrl}/api/spaces/${spaceId}/storage`;
 
-  async function fetchApi(path: string, options?: RequestInit): Promise<Response> {
+  async function fetchApi(
+    path: string,
+    options?: RequestInit,
+  ): Promise<Response> {
     const res = await fetch(`${baseUrl}${path}`, {
       ...options,
       headers: {
         Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
+        "Content-Type": "application/json",
         ...options?.headers,
       },
     });
     if (!res.ok) {
-      const body = await res.text().catch(() => '');
-      throw new Error(`Takos API error: ${res.status} ${res.statusText} — ${body}`);
+      const body = await res.text().catch(() => "");
+      throw new Error(
+        `Takos API error: ${res.status} ${res.statusText} — ${body}`,
+      );
     }
     return res;
   }
 
   async function list(prefix?: string): Promise<StorageFile[]> {
-    const query = prefix ? `?prefix=${encodeURIComponent(prefix)}` : '';
+    const query = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
     const res = await fetchApi(query);
     const data = await res.json();
     return (data.files ?? data) as StorageFile[];
@@ -79,23 +84,26 @@ export function createTakosStorageClient(
 
   async function putContent(fileId: string, content: string): Promise<void> {
     await fetchApi(`/${fileId}/content`, {
-      method: 'PUT',
+      method: "PUT",
       body: content,
-      headers: { 'Content-Type': 'text/plain' },
+      headers: { "Content-Type": "text/plain" },
     });
   }
 
   async function create(name: string, parentId?: string): Promise<StorageFile> {
-    const res = await fetchApi('/files', {
-      method: 'POST',
+    const res = await fetchApi("/files", {
+      method: "POST",
       body: JSON.stringify({ name, parentId }),
     });
     return (await res.json()) as StorageFile;
   }
 
-  async function createFolder(name: string, parentId?: string): Promise<StorageFile> {
-    const res = await fetchApi('/folders', {
-      method: 'POST',
+  async function createFolder(
+    name: string,
+    parentId?: string,
+  ): Promise<StorageFile> {
+    const res = await fetchApi("/folders", {
+      method: "POST",
       body: JSON.stringify({ name, parentId }),
     });
     return (await res.json()) as StorageFile;
@@ -103,14 +111,23 @@ export function createTakosStorageClient(
 
   async function rename(fileId: string, name: string): Promise<void> {
     await fetchApi(`/${fileId}`, {
-      method: 'PATCH',
+      method: "PATCH",
       body: JSON.stringify({ name }),
     });
   }
 
   async function del(fileId: string): Promise<void> {
-    await fetchApi(`/${fileId}`, { method: 'DELETE' });
+    await fetchApi(`/${fileId}`, { method: "DELETE" });
   }
 
-  return { list, get, getContent, putContent, create, createFolder, rename, delete: del };
+  return {
+    list,
+    get,
+    getContent,
+    putContent,
+    create,
+    createFolder,
+    rename,
+    delete: del,
+  };
 }

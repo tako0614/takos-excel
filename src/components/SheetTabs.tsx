@@ -1,5 +1,5 @@
-import { Component, For, createSignal, Show } from "solid-js";
-import type { Spreadsheet, Sheet } from "../types";
+import { Component, createSignal, For, Show } from "solid-js";
+import type { Sheet, Spreadsheet } from "../types";
 
 interface SheetTabsProps {
   spreadsheet: Spreadsheet;
@@ -11,11 +11,13 @@ interface SheetTabsProps {
 }
 
 export const SheetTabs: Component<SheetTabsProps> = (props) => {
-  const [contextMenu, setContextMenu] = createSignal<{
-    x: number;
-    y: number;
-    sheetId: string;
-  } | null>(null);
+  const [contextMenu, setContextMenu] = createSignal<
+    {
+      x: number;
+      y: number;
+      sheetId: string;
+    } | null
+  >(null);
   const [renamingId, setRenamingId] = createSignal<string | null>(null);
   const [renameValue, setRenameValue] = createSignal("");
 
@@ -62,6 +64,7 @@ export const SheetTabs: Component<SheetTabsProps> = (props) => {
             when={renamingId() === sheet.id}
             fallback={
               <button
+                type="button"
                 class={`mr-0.5 flex h-6 items-center rounded px-3 text-xs transition-colors ${
                   sheet.id === props.activeSheetId
                     ? "bg-neutral-700 text-neutral-100"
@@ -91,6 +94,7 @@ export const SheetTabs: Component<SheetTabsProps> = (props) => {
 
       {/* Add sheet button */}
       <button
+        type="button"
         class="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
         onClick={props.onAddSheet}
         title="Add sheet"

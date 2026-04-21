@@ -1,14 +1,19 @@
 import {
   Component,
-  createSignal,
   createMemo,
-  onMount,
-  onCleanup,
-  Show,
+  createSignal,
   For,
+  onCleanup,
+  onMount,
+  Show,
 } from "solid-js";
-import type { Sheet, CellData, CellFormat } from "../types";
-import { columnToLetter, formatCellAddress, parseCellAddress } from "../lib/cell-utils";
+import type { CellData, CellFormat, Sheet } from "../types";
+import {
+  columnToLetter,
+  formatCellAddress,
+  parseCellAddress,
+} from "../lib/cell-utils";
+import { evaluateConditionalRules } from "../lib/conditional-format";
 import { CellEditor } from "./CellEditor";
 
 const TOTAL_COLS = 100;
@@ -178,18 +183,23 @@ export const Grid: Component<GridProps> = (props) => {
     return props.sheet.cells[addr];
   };
 
-  // Build cell style from format
-  const getCellStyle = (format?: CellFormat): string => {
-    if (!format) return "";
-    const parts: string[] = [];
-    if (format.bold) parts.push("font-weight:bold");
-    if (format.italic) parts.push("font-style:italic");
-    if (format.underline) parts.push("text-decoration:underline");
-    if (format.textColor) parts.push(`color:${format.textColor}`);
-    if (format.bgColor) parts.push(`background-color:${format.bgColor}`);
-    if (format.fontSize) parts.push(`font-size:${format.fontSize}px`);
-    if (format.textAlign) parts.push(`text-align:${format.textAlign}`);
-    return parts.join(";");
+  // Conditional formatting: evaluate once whenever sheet data changes
+  const conditionalFormats = createMemo(() => {
+    const rules = props.sheet.conditionalRules;
+    if (!rules || rules.length === 0) return {};
+    return evaluateConditionalRules(rules, props.sheet.cells);
+  });
+
+  /** Merge base cell format with any conditional formatting overrides. */
+  const getMergedFormat = (
+    col: number,
+    row: number,
+  ): CellFormat | undefined => {
+    const addr = formatCellAddress(col, row);
+    const base = props.sheet.cells[addr]?.format;
+    const cond = conditionalFormats()[addr];
+    if (!base && !cond) return undefined;
+    return { ...(base ?? {}), ...(cond ?? {}) };
   };
 
   // Handle scroll
@@ -312,12 +322,16 @@ export const Grid: Component<GridProps> = (props) => {
     const viewBottom = viewTop + containerRef.clientHeight - HEADER_HEIGHT;
 
     if (cellLeft < viewLeft) containerRef.scrollLeft = cellLeft;
-    else if (cellRight > viewRight)
-      containerRef.scrollLeft = cellRight - (containerRef.clientWidth - HEADER_WIDTH);
+    else if (cellRight > viewRight) {
+      containerRef.scrollLeft = cellRight -
+        (containerRef.clientWidth - HEADER_WIDTH);
+    }
 
     if (cellTop < viewTop) containerRef.scrollTop = cellTop;
-    else if (cellBottom > viewBottom)
-      containerRef.scrollTop = cellBottom - (containerRef.clientHeight - HEADER_HEIGHT);
+    else if (cellBottom > viewBottom) {
+      containerRef.scrollTop = cellBottom -
+        (containerRef.clientHeight - HEADER_HEIGHT);
+    }
   };
 
   // Column resize handlers
@@ -491,10 +505,10 @@ export const Grid: Component<GridProps> = (props) => {
           {(row) => (
             <For each={visibleColIndices()}>
               {(col) => {
-                const cell = () => getCellData(col, row);
                 const isSelected = () =>
                   selectedParsed().col === col && selectedParsed().row === row;
                 const inRange = () => isCellInRange(col, row);
+                const fmt = () => getMergedFormat(col, row);
 
                 return (
                   <div
@@ -506,26 +520,29 @@ export const Grid: Component<GridProps> = (props) => {
                       top: `${rowPositions()[row] + HEADER_HEIGHT}px`,
                       width: `${getColWidth(col)}px`,
                       height: `${getRowHeight(row)}px`,
-                      ...(cell()?.format?.bgColor
-                        ? { "background-color": cell()!.format!.bgColor }
+                      ...(fmt()?.bgColor
+                        ? { "background-color": fmt()!.bgColor }
                         : {}),
-                      ...(cell()?.format?.textColor
-                        ? { color: cell()!.format!.textColor }
+                      ...(fmt()?.textColor
+                        ? { color: fmt()!.textColor }
                         : { color: "#e5e5e5" }),
-                      ...(cell()?.format?.bold
-                        ? { "font-weight": "bold" }
-                        : {}),
-                      ...(cell()?.format?.italic
-                        ? { "font-style": "italic" }
-                        : {}),
-                      ...(cell()?.format?.underline
+                      ...(fmt()?.bold ? { "font-weight": "bold" } : {}),
+                      ...(fmt()?.italic ? { "font-style": "italic" } : {}),
+                      ...(fmt()?.underline
                         ? { "text-decoration": "underline" }
                         : {}),
-                      ...(cell()?.format?.fontSize
-                        ? { "font-size": `${cell()!.format!.fontSize}px` }
+                      ...(fmt()?.fontSize
+                        ? { "font-size": `${fmt()!.fontSize}px` }
                         : {}),
-                      ...(cell()?.format?.textAlign
-                        ? { "text-align": cell()!.format!.textAlign, "justify-content": cell()!.format!.textAlign === "center" ? "center" : cell()!.format!.textAlign === "right" ? "flex-end" : "flex-start" }
+                      ...(fmt()?.textAlign
+                        ? {
+                          "text-align": fmt()!.textAlign,
+                          "justify-content": fmt()!.textAlign === "center"
+                            ? "center"
+                            : fmt()!.textAlign === "right"
+                            ? "flex-end"
+                            : "flex-start",
+                        }
                         : {}),
                     }}
                     onClick={(e) => handleCellClick(col, row, e)}

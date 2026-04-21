@@ -1,68 +1,74 @@
-apiVersion: takos.dev/v1alpha1
-kind: App
-metadata:
-  name: takos-excel
-spec:
-  version: "0.1.0"
-  description: Spreadsheet editor (Google Sheets alternative)
-  category: app
-  tags:
-    - excel
-    - spreadsheet
-    - editor
-    - formula
+name: takos-excel
+version: "0.1.0"
 
-  workers:
-    web:
-      build:
-        fromWorkflow:
-          path: .takos/workflows/deploy.yml
-          job: build-web
-          artifact: web
-          artifactPath: dist
+publish:
+  - name: takos-api
+    publisher: takos
+    type: api-key
+    spec:
+      scopes:
+        - files:read
+        - files:write
+  - name: excel-oauth
+    publisher: takos
+    type: oauth-client
+    spec:
+      clientName: Takos Excel
+      redirectUris:
+        - /api/auth/callback
+      scopes:
+        - openid
+        - profile
+        - email
+  - name: excel-ui
+    publisher: web
+    type: UiSurface
+    path: /
+    title: Excel
+    spec: {}
+  - name: excel-mcp
+    publisher: web
+    type: McpServer
+    path: /mcp
+    title: Excel MCP
+    spec:
+      transport: streamable-http
+      authSecretRef: MCP_AUTH_TOKEN
 
-  routes:
-    - name: web
-      target: web
-      path: /
+compute:
+  web:
+    readiness: /healthz
+    env:
+      MCP_AUTH_REQUIRED: "1"
+      APP_AUTH_REQUIRED: "1"
+    consume:
+      - publication: takos-api
+        env:
+          endpoint: TAKOS_API_URL
+          apiKey: TAKOS_ACCESS_TOKEN
+      - publication: excel-oauth
+        env:
+          clientId: OAUTH_CLIENT_ID
+          clientSecret: OAUTH_CLIENT_SECRET
+          issuer: OAUTH_ISSUER_URL
+    build:
+      fromWorkflow:
+        path: .takos/workflows/deploy.yml
+        job: build-web
+        artifact: web
+        artifactPath: dist/worker.js
 
-  takos:
-    scopes:
-      - files:read
-      - files:write
+resources:
+  excel-session-secret:
+    type: secret
+    generate: true
+    bind: APP_SESSION_SECRET
+    to: web
 
-  env:
-    required:
-      - TAKOS_ACCESS_TOKEN
-    inject:
-      APP_URL: "{{routes.web.url}}"
-      TAKOS_API_URL: "{{takos.apiUrl}}"
-
-  mcpServers:
-    takos-excel:
-      command: deno
-      args: ["task", "mcp"]
-      cwd: "{{root}}"
-      tools:
-        - sheet_list
-        - sheet_create
-        - sheet_get
-        - sheet_delete
-        - sheet_set_title
-        - sheet_add_tab
-        - sheet_remove_tab
-        - sheet_rename_tab
-        - sheet_get_cell
-        - sheet_set_cell
-        - sheet_get_range
-        - sheet_set_range
-        - sheet_clear_range
-        - sheet_format_cell
-        - sheet_format_range
-        - sheet_evaluate
-        - sheet_get_computed
-        - sheet_set_column_width
-        - sheet_set_row_height
-        - sheet_screenshot
-        - sheet_export_csv
-        - sheet_export_json
+routes:
+  - target: web
+    path: /
+  - target: web
+    path: /api
+  - target: web
+    path: /mcp

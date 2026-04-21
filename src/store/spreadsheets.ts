@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import type { Spreadsheet, CellAddress } from "../types";
+import type { CellAddress, Spreadsheet } from "../types";
 import { loadSpreadsheets } from "../lib/storage";
 
 /**
@@ -18,7 +18,8 @@ export const currentSpreadsheetAtom = atom<Spreadsheet | null>(null);
 export const activeSheetAtom = atom((get) => {
   const ss = get(currentSpreadsheetAtom);
   if (!ss) return null;
-  return ss.sheets.find((s) => s.id === ss.activeSheetId) ?? ss.sheets[0] ?? null;
+  return ss.sheets.find((s) => s.id === ss.activeSheetId) ?? ss.sheets[0] ??
+    null;
 });
 
 /**
@@ -29,10 +30,12 @@ export const selectedCellAtom = atom<CellAddress>("A1");
 /**
  * Selection range: start and end addresses for range selection
  */
-export const selectionRangeAtom = atom<{
-  start: CellAddress;
-  end: CellAddress;
-} | null>(null);
+export const selectionRangeAtom = atom<
+  {
+    start: CellAddress;
+    end: CellAddress;
+  } | null
+>(null);
 
 /**
  * Whether the cell editor is currently active

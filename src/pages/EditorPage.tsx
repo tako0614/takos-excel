@@ -1,15 +1,18 @@
-import { Component, createSignal, createEffect, onMount, Show } from "solid-js";
-import { useParams, useNavigate } from "@solidjs/router";
-import type { Spreadsheet, Sheet, CellFormat, CellData } from "../types";
+import { Component, createSignal, onCleanup, onMount, Show } from "solid-js";
+import { useNavigate, useParams } from "@solidjs/router";
+import type { CellData, CellFormat, Sheet, Spreadsheet } from "../types";
 import {
-  getSpreadsheet,
-  updateSpreadsheet,
   addSheet,
   deleteSheet,
+  getSpreadsheet,
+  loadSpreadsheetsFromApi,
   renameSheet,
+  updateSpreadsheet,
 } from "../lib/storage";
 import { evaluateSheet, setCellValue } from "../lib/formula";
-import { parseCellAddress, formatCellAddress } from "../lib/cell-utils";
+import { formatCellAddress, parseCellAddress } from "../lib/cell-utils";
+import { parseCsv } from "../lib/csv-parser";
+import { UndoRedoManager } from "../lib/history";
 import { Grid } from "../components/Grid";
 import { Toolbar } from "../components/Toolbar";
 import { FormulaBar } from "../components/FormulaBar";
@@ -21,33 +24,94 @@ export const EditorPage: Component = () => {
 
   const [spreadsheet, setSpreadsheet] = createSignal<Spreadsheet | null>(null);
   const [selectedCell, setSelectedCell] = createSignal("A1");
-  const [selectionRange, setSelectionRange] = createSignal<{
-    start: string;
-    end: string;
-  } | null>(null);
+  const [selectionRange, setSelectionRange] = createSignal<
+    {
+      start: string;
+      end: string;
+    } | null
+  >(null);
   const [isEditing, setIsEditing] = createSignal(false);
   const [editValue, setEditValue] = createSignal("");
 
+  // Undo/redo managers keyed by sheet id
+  const historyManagers = new Map<
+    string,
+    UndoRedoManager<Record<string, CellData>>
+  >();
+  const [canUndo, setCanUndo] = createSignal(false);
+  const [canRedo, setCanRedo] = createSignal(false);
+
+  const getHistory = (
+    sheetId: string,
+  ): UndoRedoManager<Record<string, CellData>> => {
+    let mgr = historyManagers.get(sheetId);
+    if (!mgr) {
+      mgr = new UndoRedoManager<Record<string, CellData>>(50);
+      historyManagers.set(sheetId, mgr);
+    }
+    return mgr;
+  };
+
+  const refreshUndoRedo = () => {
+    const ss = spreadsheet();
+    if (!ss) return;
+    const mgr = getHistory(ss.activeSheetId);
+    setCanUndo(mgr.canUndo());
+    setCanRedo(mgr.canRedo());
+  };
+
+  /** Push a snapshot of the current sheet cells for undo. */
+  const pushHistory = () => {
+    const ss = spreadsheet();
+    if (!ss) return;
+    const sheet = ss.sheets.find((s) => s.id === ss.activeSheetId);
+    if (!sheet) return;
+    const mgr = getHistory(ss.activeSheetId);
+    // Deep clone cells
+    mgr.push(JSON.parse(JSON.stringify(sheet.cells)));
+    refreshUndoRedo();
+  };
+
   // Load spreadsheet on mount
   onMount(() => {
-    const ss = getSpreadsheet(params.id);
-    if (!ss) {
-      navigate("/");
-      return;
-    }
+    void loadSpreadsheetsFromApi()
+      .then((spreadsheets) => {
+        const remote = spreadsheets.find((entry) => entry.id === params.id);
+        if (remote) setSpreadsheetForEditing(remote);
+        else if (!spreadsheet()) navigate("/");
+      })
+      .catch(() => {
+        if (!spreadsheet()) navigate("/");
+      });
+
+    // Register undo/redo keyboard shortcuts
+    document.addEventListener("keydown", handleGlobalKeyDown);
+  });
+
+  const setSpreadsheetForEditing = (ss: Spreadsheet) => {
     // Evaluate all formulas on load
-    const activeSheet = ss.sheets.find((s) => s.id === ss.activeSheetId) ?? ss.sheets[0];
+    const activeSheet = ss.sheets.find((s) => s.id === ss.activeSheetId) ??
+      ss.sheets[0];
     if (activeSheet) {
       activeSheet.cells = evaluateSheet(activeSheet);
+      // Seed undo history with the initial state
+      const mgr = getHistory(activeSheet.id);
+      mgr.push(JSON.parse(JSON.stringify(activeSheet.cells)));
     }
     setSpreadsheet(ss);
+    refreshUndoRedo();
+  };
+
+  onCleanup(() => {
+    document.removeEventListener("keydown", handleGlobalKeyDown);
   });
 
   // Get active sheet
   const activeSheet = (): Sheet | null => {
     const ss = spreadsheet();
     if (!ss) return null;
-    return ss.sheets.find((s) => s.id === ss.activeSheetId) ?? ss.sheets[0] ?? null;
+    return ss.sheets.find((s) => s.id === ss.activeSheetId) ?? ss.sheets[0] ??
+      null;
   };
 
   // Get selected cell data
@@ -70,7 +134,7 @@ export const EditorPage: Component = () => {
     const updated = {
       ...ss,
       sheets: ss.sheets.map((s) =>
-        s.id === ss.activeSheetId ? { ...s, cells } : s,
+        s.id === ss.activeSheetId ? { ...s, cells } : s
       ),
     };
     save(updated);
@@ -97,6 +161,7 @@ export const EditorPage: Component = () => {
     const sheet = activeSheet();
     if (!sheet) return;
 
+    pushHistory();
     const address = selectedCell();
     const value = editValue();
     const updatedCells = setCellValue(sheet, address, value);
@@ -127,6 +192,7 @@ export const EditorPage: Component = () => {
     const sheet = activeSheet();
     if (!sheet) return;
 
+    pushHistory();
     // Submit current value first
     const address = selectedCell();
     const value = editValue();
@@ -165,6 +231,7 @@ export const EditorPage: Component = () => {
     const sheet = activeSheet();
     if (!sheet) return;
 
+    pushHistory();
     const address = selectedCell();
     const cell = sheet.cells[address] ?? { value: "" };
     const updatedCells = {
@@ -184,6 +251,67 @@ export const EditorPage: Component = () => {
     save({ ...ss, title });
   };
 
+  // Undo
+  const handleUndo = () => {
+    const ss = spreadsheet();
+    if (!ss) return;
+    const mgr = getHistory(ss.activeSheetId);
+    const prev = mgr.undo();
+    if (prev) {
+      updateCells(JSON.parse(JSON.stringify(prev)));
+      refreshUndoRedo();
+    }
+  };
+
+  // Redo
+  const handleRedo = () => {
+    const ss = spreadsheet();
+    if (!ss) return;
+    const mgr = getHistory(ss.activeSheetId);
+    const next = mgr.redo();
+    if (next) {
+      updateCells(JSON.parse(JSON.stringify(next)));
+      refreshUndoRedo();
+    }
+  };
+
+  // Import CSV into current sheet
+  const handleImportCsv = (content: string) => {
+    const sheet = activeSheet();
+    if (!sheet) return;
+
+    pushHistory();
+    const rows = parseCsv(content);
+    const updatedCells = { ...sheet.cells };
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < rows[r].length; c++) {
+        const addr = formatCellAddress(c, r);
+        const existing = updatedCells[addr];
+        updatedCells[addr] = {
+          ...existing,
+          value: rows[r][c],
+          format: existing?.format,
+        };
+      }
+    }
+    const evaluated = evaluateSheet({ ...sheet, cells: updatedCells });
+    updateCells(evaluated);
+  };
+
+  // Keyboard shortcut handler for undo/redo
+  const handleGlobalKeyDown = (e: KeyboardEvent) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) {
+      e.preventDefault();
+      handleUndo();
+    } else if (
+      ((e.ctrlKey || e.metaKey) && e.key === "y") ||
+      ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "z")
+    ) {
+      e.preventDefault();
+      handleRedo();
+    }
+  };
+
   // Sheet operations
   const handleSwitchSheet = (sheetId: string) => {
     const ss = spreadsheet();
@@ -193,11 +321,17 @@ export const EditorPage: Component = () => {
     const newSheet = updated.sheets.find((s) => s.id === sheetId);
     if (newSheet) {
       newSheet.cells = evaluateSheet(newSheet);
+      // Seed undo history for this sheet if not already present
+      const mgr = getHistory(sheetId);
+      if (!mgr.canUndo() && !mgr.canRedo()) {
+        mgr.push(JSON.parse(JSON.stringify(newSheet.cells)));
+      }
     }
     save(updated);
     setSelectedCell("A1");
     setEditValue("");
     setIsEditing(false);
+    refreshUndoRedo();
   };
 
   const handleAddSheet = () => {
@@ -246,7 +380,7 @@ export const EditorPage: Component = () => {
       sheets: ss.sheets.map((s) =>
         s.id === ss.activeSheetId
           ? { ...s, colWidths: { ...s.colWidths, [colIndex]: width } }
-          : s,
+          : s
       ),
     };
     save(updated);
@@ -254,7 +388,14 @@ export const EditorPage: Component = () => {
 
   return (
     <div class="flex h-screen flex-col bg-neutral-900">
-      <Show when={spreadsheet()} fallback={<div class="flex h-screen items-center justify-center text-neutral-500">Loading...</div>}>
+      <Show
+        when={spreadsheet()}
+        fallback={
+          <div class="flex h-screen items-center justify-center text-neutral-500">
+            Loading...
+          </div>
+        }
+      >
         {(ss) => (
           <>
             {/* Toolbar */}
@@ -264,6 +405,11 @@ export const EditorPage: Component = () => {
               title={ss().title}
               onTitleChange={handleTitleChange}
               onNavigateHome={() => navigate("/")}
+              onImportCsv={handleImportCsv}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              canUndo={canUndo()}
+              canRedo={canRedo()}
             />
 
             {/* Formula Bar */}

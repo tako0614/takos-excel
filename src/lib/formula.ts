@@ -1,6 +1,6 @@
 import { HyperFormula } from "hyperformula";
-import type { Sheet, CellData } from "../types";
-import { parseCellAddress, columnToLetter } from "./cell-utils";
+import type { CellData, Sheet } from "../types/index.ts";
+import { columnToLetter, parseCellAddress } from "./cell-utils.ts";
 
 let hfInstance: HyperFormula | null = null;
 
@@ -25,7 +25,7 @@ export function syncSheetToEngine(sheet: Sheet): number {
   // Remove all existing sheets
   const sheetNames = hf.getSheetNames();
   for (const name of sheetNames) {
-    const id = hf.getSheetId(hf.getSheetName(hf.getSheetId(name)!)!);
+    const id = hf.getSheetId(name);
     if (id !== undefined) {
       hf.removeSheet(id);
     }
@@ -74,7 +74,11 @@ export function syncSheetToEngine(sheet: Sheet): number {
     data.push(row);
   }
 
-  const sheetId = hf.addSheet(sheet.name);
+  const sheetName = hf.addSheet(sheet.name);
+  const sheetId = hf.getSheetId(sheetName);
+  if (sheetId === undefined) {
+    throw new Error(`Failed to create HyperFormula sheet: ${sheet.name}`);
+  }
   hf.setSheetContent(sheetId, data);
   return sheetId;
 }
@@ -89,7 +93,9 @@ export function evaluateSheet(
   const sheetId = syncSheetToEngine(sheet);
   const updatedCells: Record<string, CellData> = { ...sheet.cells };
 
-  for (const [addr, cell] of Object.entries(sheet.cells)) {
+  for (
+    const [addr, cell] of Object.entries(sheet.cells) as [string, CellData][]
+  ) {
     if (!cell.value) {
       updatedCells[addr] = { ...cell, computed: "" };
       continue;

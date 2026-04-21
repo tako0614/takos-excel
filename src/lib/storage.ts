@@ -1,6 +1,68 @@
-import type { Spreadsheet, Sheet } from "../types";
+import type { Sheet, Spreadsheet } from "../types/index.ts";
 
 const STORAGE_KEY = "takos-excel-spreadsheets";
+const API_SPREADSHEETS_PATH = "/api/spreadsheets";
+
+function redirectToLogin(): void {
+  const location = globalThis.location;
+  if (!location) return;
+  const returnTo = `${location.pathname}${location.search}${location.hash}`;
+  location.href = `/api/auth/login?return_to=${encodeURIComponent(returnTo)}`;
+}
+
+export function clearSpreadsheetsCache(): void {
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+async function requestJson<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetch(path, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...init?.headers,
+    },
+    credentials: "same-origin",
+  });
+  if (response.status === 401) {
+    clearSpreadsheetsCache();
+    redirectToLogin();
+  }
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
+  return await response.json() as T;
+}
+
+function syncSpreadsheetToApi(spreadsheet: Spreadsheet): void {
+  void requestJson<Spreadsheet>(
+    `${API_SPREADSHEETS_PATH}/${encodeURIComponent(spreadsheet.id)}`,
+    {
+      method: "PUT",
+      body: JSON.stringify(spreadsheet),
+    },
+  ).catch(() => undefined);
+}
+
+function deleteSpreadsheetFromApi(id: string): void {
+  void fetch(`${API_SPREADSHEETS_PATH}/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    credentials: "same-origin",
+  }).then((response) => {
+    if (response.status === 401) {
+      clearSpreadsheetsCache();
+      redirectToLogin();
+    }
+  }).catch(() => undefined);
+}
+
+export async function loadSpreadsheetsFromApi(): Promise<Spreadsheet[]> {
+  const spreadsheets = await requestJson<Spreadsheet[]>(API_SPREADSHEETS_PATH);
+  saveSpreadsheets(spreadsheets);
+  return spreadsheets;
+}
 
 /**
  * Load all spreadsheets from localStorage
@@ -56,6 +118,7 @@ export function createSpreadsheet(title: string): Spreadsheet {
   const all = loadSpreadsheets();
   all.push(spreadsheet);
   saveSpreadsheets(all);
+  syncSpreadsheetToApi(spreadsheet);
   return spreadsheet;
 }
 
@@ -68,6 +131,7 @@ export function updateSpreadsheet(spreadsheet: Spreadsheet): void {
   if (index !== -1) {
     all[index] = { ...spreadsheet, updatedAt: new Date().toISOString() };
     saveSpreadsheets(all);
+    syncSpreadsheetToApi(all[index]);
   }
 }
 
@@ -77,6 +141,7 @@ export function updateSpreadsheet(spreadsheet: Spreadsheet): void {
 export function deleteSpreadsheet(id: string): void {
   const all = loadSpreadsheets();
   saveSpreadsheets(all.filter((s) => s.id !== id));
+  deleteSpreadsheetFromApi(id);
 }
 
 /**
@@ -100,6 +165,7 @@ export function addSheet(spreadsheetId: string): Sheet | undefined {
   ss.activeSheetId = newSheet.id;
   ss.updatedAt = new Date().toISOString();
   saveSpreadsheets(all);
+  syncSpreadsheetToApi(ss);
   return newSheet;
 }
 
@@ -120,6 +186,7 @@ export function deleteSheet(
   }
   ss.updatedAt = new Date().toISOString();
   saveSpreadsheets(all);
+  syncSpreadsheetToApi(ss);
   return true;
 }
 
@@ -141,5 +208,6 @@ export function renameSheet(
   sheet.name = newName;
   ss.updatedAt = new Date().toISOString();
   saveSpreadsheets(all);
+  syncSpreadsheetToApi(ss);
   return true;
 }

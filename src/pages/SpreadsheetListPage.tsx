@@ -1,22 +1,26 @@
-import { Component, createSignal, For, Show } from "solid-js";
+import { Component, createSignal, For, onMount, Show } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import {
-  loadSpreadsheets,
   createSpreadsheet,
   deleteSpreadsheet,
+  loadSpreadsheetsFromApi,
 } from "../lib/storage";
 import { SpreadsheetCard } from "../components/SpreadsheetCard";
 import type { Spreadsheet } from "../types";
 
 export const SpreadsheetListPage: Component = () => {
   const navigate = useNavigate();
-  const [spreadsheets, setSpreadsheets] = createSignal<Spreadsheet[]>(
-    loadSpreadsheets(),
-  );
+  const [spreadsheets, setSpreadsheets] = createSignal<Spreadsheet[]>([]);
+  const [isLoading, setIsLoading] = createSignal(true);
   const [showNewDialog, setShowNewDialog] = createSignal(false);
   const [newTitle, setNewTitle] = createSignal("");
 
-  const refresh = () => setSpreadsheets(loadSpreadsheets());
+  onMount(() => {
+    void loadSpreadsheetsFromApi()
+      .then(setSpreadsheets)
+      .catch(() => undefined)
+      .finally(() => setIsLoading(false));
+  });
 
   const handleCreate = () => {
     const title = newTitle().trim() || "Untitled Spreadsheet";
@@ -30,7 +34,7 @@ export const SpreadsheetListPage: Component = () => {
     e.stopPropagation();
     if (confirm("Delete this spreadsheet?")) {
       deleteSpreadsheet(id);
-      refresh();
+      setSpreadsheets((prev) => prev.filter((ss) => ss.id !== id));
     }
   };
 
@@ -46,6 +50,7 @@ export const SpreadsheetListPage: Component = () => {
             </p>
           </div>
           <button
+            type="button"
             class="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
             onClick={() => setShowNewDialog(true)}
           >
@@ -73,47 +78,50 @@ export const SpreadsheetListPage: Component = () => {
         <Show
           when={spreadsheets().length > 0}
           fallback={
-            <div class="flex flex-col items-center justify-center py-24 text-center">
-              <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-neutral-800">
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="32"
-                  height="32"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="1.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  class="text-neutral-500"
+            <Show when={!isLoading()}>
+              <div class="flex flex-col items-center justify-center py-24 text-center">
+                <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-neutral-800">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="32"
+                    height="32"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    class="text-neutral-500"
+                  >
+                    <rect
+                      x="3"
+                      y="3"
+                      width="18"
+                      height="18"
+                      rx="2"
+                      ry="2"
+                    />
+                    <line x1="3" y1="9" x2="21" y2="9" />
+                    <line x1="3" y1="15" x2="21" y2="15" />
+                    <line x1="9" y1="3" x2="9" y2="21" />
+                    <line x1="15" y1="3" x2="15" y2="21" />
+                  </svg>
+                </div>
+                <h2 class="mb-2 text-lg font-semibold text-neutral-200">
+                  No spreadsheets yet
+                </h2>
+                <p class="mb-6 text-sm text-neutral-500">
+                  Create your first spreadsheet to get started.
+                </p>
+                <button
+                  type="button"
+                  class="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500"
+                  onClick={() => setShowNewDialog(true)}
                 >
-                  <rect
-                    x="3"
-                    y="3"
-                    width="18"
-                    height="18"
-                    rx="2"
-                    ry="2"
-                  />
-                  <line x1="3" y1="9" x2="21" y2="9" />
-                  <line x1="3" y1="15" x2="21" y2="15" />
-                  <line x1="9" y1="3" x2="9" y2="21" />
-                  <line x1="15" y1="3" x2="15" y2="21" />
-                </svg>
+                  Create Spreadsheet
+                </button>
               </div>
-              <h2 class="mb-2 text-lg font-semibold text-neutral-200">
-                No spreadsheets yet
-              </h2>
-              <p class="mb-6 text-sm text-neutral-500">
-                Create your first spreadsheet to get started.
-              </p>
-              <button
-                class="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500"
-                onClick={() => setShowNewDialog(true)}
-              >
-                Create Spreadsheet
-              </button>
-            </div>
+            </Show>
           }
         >
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -156,12 +164,14 @@ export const SpreadsheetListPage: Component = () => {
             />
             <div class="flex justify-end gap-2">
               <button
+                type="button"
                 class="rounded-lg px-4 py-2 text-sm text-neutral-400 hover:text-neutral-200"
                 onClick={() => setShowNewDialog(false)}
               >
                 Cancel
               </button>
               <button
+                type="button"
                 class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
                 onClick={handleCreate}
               >

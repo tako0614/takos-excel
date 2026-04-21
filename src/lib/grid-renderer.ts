@@ -6,7 +6,7 @@
  */
 
 import { createCanvas } from "canvas";
-import type { Sheet, CellData, CellFormat } from "../types/index.ts";
+import type { CellFormat, Sheet } from "../types/index.ts";
 import { columnToLetter, formatCellAddress } from "./cell-utils.ts";
 
 interface RenderOptions {
@@ -34,7 +34,7 @@ type Ctx = ReturnType<ReturnType<typeof createCanvas>["getContext"]>;
 export function renderSheetToBuffer(
   sheet: Sheet,
   options?: RenderOptions,
-): Buffer {
+): Uint8Array {
   const numRows = options?.rows ?? 20;
   const numCols = options?.cols ?? 10;
   const imgWidth = options?.width ?? 1200;
@@ -55,8 +55,7 @@ export function renderSheetToBuffer(
 
   // Compute total grid dimensions
   const totalGridWidth = ROW_NUM_WIDTH + colWidths.reduce((a, b) => a + b, 0);
-  const totalGridHeight =
-    HEADER_HEIGHT + rowHeights.reduce((a, b) => a + b, 0);
+  const totalGridHeight = HEADER_HEIGHT + rowHeights.reduce((a, b) => a + b, 0);
 
   // Scale to fit
   const scaleX = Math.min(1, imgWidth / totalGridWidth);
@@ -157,7 +156,10 @@ function drawRowNumbers(
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(ROW_NUM_WIDTH, 0);
-  ctx.lineTo(ROW_NUM_WIDTH, HEADER_HEIGHT + rowHeights.reduce((a, b) => a + b, 0));
+  ctx.lineTo(
+    ROW_NUM_WIDTH,
+    HEADER_HEIGHT + rowHeights.reduce((a, b) => a + b, 0),
+  );
   ctx.stroke();
 }
 
@@ -169,8 +171,7 @@ function drawGridLines(
   numRows: number,
 ): void {
   const totalWidth = ROW_NUM_WIDTH + colWidths.reduce((a, b) => a + b, 0);
-  const totalHeight =
-    HEADER_HEIGHT + rowHeights.reduce((a, b) => a + b, 0);
+  const totalHeight = HEADER_HEIGHT + rowHeights.reduce((a, b) => a + b, 0);
 
   ctx.strokeStyle = GRID_LINE;
   ctx.lineWidth = 0.5;
