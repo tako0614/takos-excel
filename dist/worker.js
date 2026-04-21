@@ -61935,8 +61935,8 @@ function createServerApp(store, options = {}) {
   return app2;
 }
 function createExcelAppFromEnv(env = denoEnv()) {
-  const apiUrl = envValue2(env, "TAKOS_API_URL") || "http://localhost:8787";
-  const token = requiredEnv(env, "TAKOS_ACCESS_TOKEN");
+  const apiUrl = envValue2(env, "TAKOS_STORAGE_API_URL") || envValue2(env, "TAKOS_API_URL") || "http://localhost:8787";
+  const token = envValue2(env, "TAKOS_STORAGE_ACCESS_TOKEN") || requiredEnv(env, "TAKOS_ACCESS_TOKEN");
   const spaceId = requiredEnv(env, "TAKOS_SPACE_ID");
   const client = createTakosStorageClient(apiUrl, token, spaceId);
   const store = new SpreadsheetStore(client);

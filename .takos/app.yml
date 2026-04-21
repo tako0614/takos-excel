@@ -25,7 +25,11 @@ publish:
     type: UiSurface
     path: /
     title: Excel
-    spec: {}
+    spec:
+      description: Takos spreadsheet editor
+      icon: X
+      category: office
+      sortOrder: 20
   - name: excel-mcp
     publisher: web
     type: McpServer
@@ -44,8 +48,8 @@ compute:
     consume:
       - publication: takos-api
         env:
-          endpoint: TAKOS_API_URL
-          apiKey: TAKOS_ACCESS_TOKEN
+          endpoint: TAKOS_STORAGE_API_URL
+          apiKey: TAKOS_STORAGE_ACCESS_TOKEN
       - publication: excel-oauth
         env:
           clientId: OAUTH_CLIENT_ID
