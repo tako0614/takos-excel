@@ -27,7 +27,7 @@ publish:
     title: Excel
     spec:
       description: Takos spreadsheet editor
-      icon: X
+      icon: /icons/excel.svg
       category: office
       sortOrder: 20
   - name: excel-mcp
@@ -41,6 +41,7 @@ publish:
 
 compute:
   web:
+    icon: /icons/excel.svg
     readiness: /healthz
     env:
       MCP_AUTH_REQUIRED: "1"
