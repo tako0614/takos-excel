@@ -33,6 +33,7 @@ export const SpreadsheetCard: Component<SpreadsheetCardProps> = (props) => {
     >
       {/* Delete button */}
       <button
+        type="button"
         class="absolute top-3 right-3 rounded-md p-1.5 text-neutral-500 opacity-0 transition-opacity hover:bg-neutral-700 hover:text-red-400 group-hover:opacity-100"
         onClick={props.onDelete}
         title="Delete spreadsheet"

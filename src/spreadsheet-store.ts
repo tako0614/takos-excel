@@ -9,25 +9,24 @@
  * and written through on every mutation.
  */
 import type {
-  Spreadsheet,
-  Sheet,
-  CellData,
-  CellFormat,
   CellAddress,
+  CellFormat,
+  ConditionalRule,
+  Sheet,
+  Spreadsheet,
 } from "./types/index.ts";
 import {
-  parseCellAddress,
   formatCellAddress,
-  columnToLetter,
   letterToColumn,
+  parseCellAddress,
 } from "./lib/cell-utils.ts";
 import {
   evaluateSheet,
-  syncSheetToEngine,
   getEngine,
-  getCellValue,
   setCellValue,
+  syncSheetToEngine,
 } from "./lib/formula.ts";
+import { parseCsv } from "./lib/csv-parser.ts";
 import type { TakosStorageClient } from "./lib/takos-storage.ts";
 
 const FOLDER_NAME = "takos-excel";
@@ -153,6 +152,28 @@ export class SpreadsheetStore {
     this.cache.delete(id);
   }
 
+  async replaceSpreadsheet(spreadsheet: Spreadsheet): Promise<Spreadsheet> {
+    await this.ensureInitialized();
+    const entry = this.cache.get(spreadsheet.id);
+    const updated = {
+      ...spreadsheet,
+      updatedAt: spreadsheet.updatedAt || new Date().toISOString(),
+    };
+    if (entry) {
+      entry.ss = updated;
+      await this.client.putContent(entry.fileId, JSON.stringify(updated));
+      return updated;
+    }
+
+    const file = await this.client.create(
+      `${updated.id}.json`,
+      this.folderId ?? undefined,
+    );
+    await this.client.putContent(file.id, JSON.stringify(updated));
+    this.cache.set(updated.id, { ss: updated, fileId: file.id });
+    return updated;
+  }
+
   async setSpreadsheetTitle(id: string, title: string): Promise<void> {
     const ss = await this.getSpreadsheet(id);
     ss.title = title;
@@ -192,8 +213,9 @@ export class SpreadsheetStore {
 
   async removeTab(spreadsheetId: string, sheetId: string): Promise<void> {
     const ss = await this.getSpreadsheet(spreadsheetId);
-    if (ss.sheets.length <= 1)
+    if (ss.sheets.length <= 1) {
       throw new Error("Cannot remove the last sheet tab");
+    }
     ss.sheets = ss.sheets.filter((s) => s.id !== sheetId);
     if (ss.activeSheetId === sheetId) {
       ss.activeSheetId = ss.sheets[0].id;
@@ -476,6 +498,75 @@ export class SpreadsheetStore {
   async exportJson(spreadsheetId: string): Promise<string> {
     const ss = await this.getSpreadsheet(spreadsheetId);
     return JSON.stringify(ss, null, 2);
+  }
+
+  // -----------------------------------------------------------------------
+  // CSV Import
+  // -----------------------------------------------------------------------
+
+  async importCsv(
+    spreadsheetId: string,
+    sheetId: string,
+    csvContent: string,
+    startCell = "A1",
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    const rows = parseCsv(csvContent);
+    const { col: sc, row: sr } = parseCellAddress(startCell);
+
+    for (let r = 0; r < rows.length; r++) {
+      for (let c = 0; c < rows[r].length; c++) {
+        const addr = formatCellAddress(sc + c, sr + r);
+        const existing = sheet.cells[addr];
+        sheet.cells[addr] = {
+          ...existing,
+          value: rows[r][c],
+          format: existing?.format,
+        };
+      }
+    }
+
+    sheet.cells = evaluateSheet(sheet);
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  // -----------------------------------------------------------------------
+  // Conditional Formatting
+  // -----------------------------------------------------------------------
+
+  async addConditionalRule(
+    spreadsheetId: string,
+    sheetId: string,
+    rule: ConditionalRule,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    if (!sheet.conditionalRules) sheet.conditionalRules = [];
+    sheet.conditionalRules.push(rule);
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  async removeConditionalRule(
+    spreadsheetId: string,
+    sheetId: string,
+    ruleId: string,
+  ): Promise<void> {
+    const { ss, sheet } = await this.getSheet(spreadsheetId, sheetId);
+    if (!sheet.conditionalRules) return;
+    sheet.conditionalRules = sheet.conditionalRules.filter(
+      (r) => r.id !== ruleId,
+    );
+    this.touch(ss);
+    await this.persist(spreadsheetId);
+  }
+
+  async listConditionalRules(
+    spreadsheetId: string,
+    sheetId: string,
+  ): Promise<ConditionalRule[]> {
+    const { sheet } = await this.getSheet(spreadsheetId, sheetId);
+    return sheet.conditionalRules ?? [];
   }
 }
 

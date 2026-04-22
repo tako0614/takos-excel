@@ -1,10 +1,22 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SpreadsheetStore } from "./spreadsheet-store.ts";
-import { renderSheetToBuffer } from "./lib/grid-renderer.ts";
+import {
+  isValidCellAddress,
+  isValidCellRange,
+  letterToColumn,
+  MAX_RANGE_CELLS,
+  MAX_SPREADSHEET_COLUMNS,
+  MAX_SPREADSHEET_ROWS,
+  parseCellAddress,
+} from "./lib/cell-utils.ts";
 
 // deno-lint-ignore no-explicit-any
 type Any = any;
+
+export type McpServerOptions = {
+  nativeRendering?: boolean;
+};
 
 function text(s: string) {
   return { content: [{ type: "text" as const, text: s }] };
@@ -14,7 +26,78 @@ function json(v: unknown) {
   return text(JSON.stringify(v, null, 2));
 }
 
-export function createMcpServer(store: SpreadsheetStore): McpServer {
+function bytesToBase64(bytes: Uint8Array): string {
+  const chunkSize = 0x8000;
+  let binary = "";
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(
+      ...bytes.subarray(offset, offset + chunkSize),
+    );
+  }
+  return btoa(binary);
+}
+
+const MAX_ID_LENGTH = 128;
+const MAX_TITLE_LENGTH = 200;
+const MAX_CELL_VALUE_LENGTH = 50_000;
+const MAX_FORMULA_LENGTH = 8_192;
+const MAX_CSV_LENGTH = 1_000_000;
+const MAX_FORMAT_STRING_LENGTH = 120;
+const MAX_SCREENSHOT_WIDTH = 2_400;
+const MAX_SCREENSHOT_HEIGHT = 1_600;
+
+const idSchema = z.string().trim().min(1).max(MAX_ID_LENGTH);
+const titleSchema = z.string().max(MAX_TITLE_LENGTH);
+const cellAddressSchema = z
+  .string()
+  .trim()
+  .min(2)
+  .max(6)
+  .refine(isValidCellAddress, {
+    message: "Invalid or out-of-bounds cell address",
+  });
+const cellRangeSchema = z
+  .string()
+  .trim()
+  .min(5)
+  .max(13)
+  .refine(isValidCellRange, {
+    message: "Invalid, too large, or out-of-bounds range",
+  });
+const columnSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(3)
+  .regex(/^[A-Z]+$/)
+  .refine((column) => letterToColumn(column) < MAX_SPREADSHEET_COLUMNS, {
+    message: "Column is out of bounds",
+  });
+const cellValueSchema = z.string().max(MAX_CELL_VALUE_LENGTH);
+const formulaSchema = z.string().min(1).max(MAX_FORMULA_LENGTH);
+const rangeValuesSchema = z
+  .array(z.array(cellValueSchema).min(1).max(MAX_SPREADSHEET_COLUMNS))
+  .min(1)
+  .max(MAX_SPREADSHEET_ROWS)
+  .refine(
+    (rows) =>
+      rows.reduce((count, row) => count + row.length, 0) <= MAX_RANGE_CELLS,
+    { message: "Too many cells in one request" },
+  );
+const safeCssValueSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(MAX_FORMAT_STRING_LENGTH)
+  .refine((value) => !/[<>{};]/.test(value) && !/\burl\s*\(/i.test(value), {
+    message: "Must be a safe CSS color",
+  });
+
+export function createMcpServer(
+  store: SpreadsheetStore,
+  options: McpServerOptions = {},
+): McpServer {
+  const nativeRendering = options.nativeRendering ?? true;
   const mcp = new McpServer({
     name: "takos-excel",
     version: "0.1.0",
@@ -36,7 +119,7 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
   mcp.tool(
     "sheet_create",
     "Create a new spreadsheet",
-    { title: z.string().describe("Spreadsheet title") },
+    { title: titleSchema.describe("Spreadsheet title") },
     async (args: Any) => {
       const id = await store.createSpreadsheet(args.title);
       return json({ id });
@@ -46,7 +129,7 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
   mcp.tool(
     "sheet_get",
     "Get spreadsheet info (metadata + sheet names)",
-    { id: z.string().describe("Spreadsheet ID") },
+    { id: idSchema.describe("Spreadsheet ID") },
     async (args: Any) => {
       const ss = await store.getSpreadsheet(args.id);
       return json({
@@ -62,7 +145,7 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
   mcp.tool(
     "sheet_delete",
     "Delete a spreadsheet",
-    { id: z.string().describe("Spreadsheet ID") },
+    { id: idSchema.describe("Spreadsheet ID") },
     async (args: Any) => {
       await store.deleteSpreadsheet(args.id);
       return text("Deleted");
@@ -73,8 +156,8 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_set_title",
     "Rename a spreadsheet",
     {
-      id: z.string().describe("Spreadsheet ID"),
-      title: z.string().describe("New title"),
+      id: idSchema.describe("Spreadsheet ID"),
+      title: titleSchema.describe("New title"),
     },
     async (args: Any) => {
       await store.setSpreadsheetTitle(args.id, args.title);
@@ -90,8 +173,10 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_add_tab",
     "Add a new sheet tab",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      name: z.string().optional().describe("Tab name (auto-generated if omitted)"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      name: titleSchema.optional().describe(
+        "Tab name (auto-generated if omitted)",
+      ),
     },
     async (args: Any) => {
       const sheetId = await store.addTab(args.spreadsheetId, args.name);
@@ -103,8 +188,8 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_remove_tab",
     "Remove a sheet tab",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
     },
     async (args: Any) => {
       await store.removeTab(args.spreadsheetId, args.sheetId);
@@ -116,9 +201,9 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_rename_tab",
     "Rename a sheet tab",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      name: z.string().describe("New tab name"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      name: titleSchema.describe("New tab name"),
     },
     async (args: Any) => {
       await store.renameTab(args.spreadsheetId, args.sheetId, args.name);
@@ -134,12 +219,14 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_get_cell",
     "Get a cell's value, computed result, and format",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      cell: z.string().describe('Cell address, e.g. "A1"'),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      cell: cellAddressSchema.describe('Cell address, e.g. "A1"'),
     },
     async (args: Any) => {
-      return json(await store.getCell(args.spreadsheetId, args.sheetId, args.cell));
+      return json(
+        await store.getCell(args.spreadsheetId, args.sheetId, args.cell),
+      );
     },
   );
 
@@ -147,13 +234,20 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_set_cell",
     "Set a cell's value or formula",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      cell: z.string().describe('Cell address, e.g. "A1"'),
-      value: z.string().describe('Cell value or formula, e.g. "42" or "=SUM(A1:A10)"'),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      cell: cellAddressSchema.describe('Cell address, e.g. "A1"'),
+      value: cellValueSchema.describe(
+        'Cell value or formula, e.g. "42" or "=SUM(A1:A10)"',
+      ),
     },
     async (args: Any) => {
-      await store.setCell(args.spreadsheetId, args.sheetId, args.cell, args.value);
+      await store.setCell(
+        args.spreadsheetId,
+        args.sheetId,
+        args.cell,
+        args.value,
+      );
       return text("OK");
     },
   );
@@ -162,12 +256,14 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_get_range",
     "Get a range of cell values as a 2D array",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      range: z.string().describe('Range, e.g. "A1:C10"'),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      range: cellRangeSchema.describe('Range, e.g. "A1:C10"'),
     },
     async (args: Any) => {
-      return json(await store.getRange(args.spreadsheetId, args.sheetId, args.range));
+      return json(
+        await store.getRange(args.spreadsheetId, args.sheetId, args.range),
+      );
     },
   );
 
@@ -175,14 +271,23 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_set_range",
     "Set a range of values from a 2D array",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      startCell: z.string().describe('Top-left cell, e.g. "A1"'),
-      values: z
-        .array(z.array(z.string()))
-        .describe("2D array of string values"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      startCell: cellAddressSchema.describe('Top-left cell, e.g. "A1"'),
+      values: rangeValuesSchema.describe("2D array of string values"),
     },
     async (args: Any) => {
+      const start = parseCellAddress(args.startCell);
+      const maxWidth = Math.max(
+        ...args.values.map((row: string[]) => row.length),
+      );
+      if (
+        start.row + args.values.length > MAX_SPREADSHEET_ROWS ||
+        start.col + maxWidth > MAX_SPREADSHEET_COLUMNS
+      ) {
+        return text("Range exceeds sheet bounds");
+      }
+
       await store.setRange(
         args.spreadsheetId,
         args.sheetId,
@@ -197,9 +302,9 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_clear_range",
     "Clear all cells in a range",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      range: z.string().describe('Range, e.g. "A1:C10"'),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      range: cellRangeSchema.describe('Range, e.g. "A1:C10"'),
     },
     async (args: Any) => {
       await store.clearRange(args.spreadsheetId, args.sheetId, args.range);
@@ -210,12 +315,16 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
   const formatSchema = {
     bold: z.boolean().optional(),
     italic: z.boolean().optional(),
-    textColor: z.string().optional().describe("CSS color string"),
-    bgColor: z.string().optional().describe("CSS background color string"),
-    fontSize: z.number().optional(),
+    underline: z.boolean().optional(),
+    textColor: safeCssValueSchema.optional().describe("CSS color string"),
+    bgColor: safeCssValueSchema.optional().describe(
+      "CSS background color string",
+    ),
+    fontSize: z.number().int().min(6).max(72).optional(),
     textAlign: z.enum(["left", "center", "right"]).optional(),
     numberFormat: z
       .string()
+      .max(MAX_FORMAT_STRING_LENGTH)
       .optional()
       .describe('Number format, e.g. "#,##0.00", "0%", "yyyy-mm-dd"'),
   };
@@ -224,10 +333,10 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_format_cell",
     "Apply formatting to a cell",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      cell: z.string().describe('Cell address, e.g. "A1"'),
-      format: z.object(formatSchema).describe("Format options"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      cell: cellAddressSchema.describe('Cell address, e.g. "A1"'),
+      format: z.object(formatSchema).strict().describe("Format options"),
     },
     async (args: Any) => {
       await store.formatCell(
@@ -244,10 +353,10 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_format_range",
     "Apply formatting to a range of cells",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      range: z.string().describe('Range, e.g. "A1:C10"'),
-      format: z.object(formatSchema).describe("Format options"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      range: cellRangeSchema.describe('Range, e.g. "A1:C10"'),
+      format: z.object(formatSchema).strict().describe("Format options"),
     },
     async (args: Any) => {
       await store.formatRange(
@@ -268,9 +377,9 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_evaluate",
     "Evaluate a formula without storing it in any cell",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      formula: z.string().describe('Formula, e.g. "=SUM(A1:A10)"'),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      formula: formulaSchema.describe('Formula, e.g. "=SUM(A1:A10)"'),
     },
     async (args: Any) => {
       const result = await store.evaluate(
@@ -286,9 +395,9 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_get_computed",
     "Get computed/evaluated values for a range",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      range: z.string().describe('Range, e.g. "A1:C10"'),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      range: cellRangeSchema.describe('Range, e.g. "A1:C10"'),
     },
     async (args: Any) => {
       return json(
@@ -305,10 +414,10 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_set_column_width",
     "Set the width of a column",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      column: z.string().describe('Column letter, e.g. "A"'),
-      width: z.number().describe("Width in pixels"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      column: columnSchema.describe('Column letter, e.g. "A"'),
+      width: z.number().int().min(40).max(500).describe("Width in pixels"),
     },
     async (args: Any) => {
       await store.setColumnWidth(
@@ -325,10 +434,12 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_set_row_height",
     "Set the height of a row",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
-      row: z.number().describe("Row number (1-based)"),
-      height: z.number().describe("Height in pixels"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      row: z.number().int().min(1).max(MAX_SPREADSHEET_ROWS).describe(
+        "Row number (1-based)",
+      ),
+      height: z.number().int().min(18).max(200).describe("Height in pixels"),
     },
     async (args: Any) => {
       await store.setRowHeight(
@@ -349,22 +460,34 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_screenshot",
     "Render a spreadsheet sheet as a PNG image showing the grid with values",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
       rows: z
         .number()
+        .int()
+        .min(1)
+        .max(100)
         .optional()
         .describe("Number of rows to show (default: 20)"),
       cols: z
         .number()
+        .int()
+        .min(1)
+        .max(MAX_SPREADSHEET_COLUMNS)
         .optional()
         .describe("Number of columns to show (default: 10)"),
       width: z
         .number()
+        .int()
+        .min(320)
+        .max(MAX_SCREENSHOT_WIDTH)
         .optional()
         .describe("Image width in pixels (default: 1200)"),
       height: z
         .number()
+        .int()
+        .min(240)
+        .max(MAX_SCREENSHOT_HEIGHT)
         .optional()
         .describe("Image height in pixels (default: 800)"),
     },
@@ -373,14 +496,30 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
         const ss = await store.getSpreadsheet(args.spreadsheetId);
         const sheet = ss.sheets.find((s) => s.id === args.sheetId);
         if (!sheet) return text(`Sheet not found: ${args.sheetId}`);
+        if (!nativeRendering) {
+          return text("sheet_screenshot is unavailable in this runtime");
+        }
+        const rendererModule = "./lib/grid-renderer.ts";
+        const { renderSheetToBuffer } = await import(
+          rendererModule
+        ) as typeof import("./lib/grid-renderer.ts");
 
         const buf = renderSheetToBuffer(sheet, {
-          rows: args.rows,
-          cols: args.cols,
-          width: args.width,
-          height: args.height,
+          rows: Math.min(100, Math.max(1, Math.trunc(args.rows ?? 20))),
+          cols: Math.min(
+            MAX_SPREADSHEET_COLUMNS,
+            Math.max(1, Math.trunc(args.cols ?? 10)),
+          ),
+          width: Math.min(
+            MAX_SCREENSHOT_WIDTH,
+            Math.max(320, Math.trunc(args.width ?? 1200)),
+          ),
+          height: Math.min(
+            MAX_SCREENSHOT_HEIGHT,
+            Math.max(240, Math.trunc(args.height ?? 800)),
+          ),
         });
-        const base64 = buf.toString("base64");
+        const base64 = bytesToBase64(buf);
         return {
           content: [
             {
@@ -397,6 +536,111 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
   );
 
   // -----------------------------------------------------------------------
+  // CSV Import
+  // -----------------------------------------------------------------------
+
+  mcp.tool(
+    "sheet_import_csv",
+    "Import CSV content into a sheet",
+    {
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      csvContent: z.string().max(MAX_CSV_LENGTH).describe("CSV content string"),
+      startCell: cellAddressSchema
+        .optional()
+        .describe('Top-left cell to start import at (default "A1")'),
+    },
+    async (args: Any) => {
+      await store.importCsv(
+        args.spreadsheetId,
+        args.sheetId,
+        args.csvContent,
+        args.startCell,
+      );
+      return text("Imported");
+    },
+  );
+
+  // -----------------------------------------------------------------------
+  // Conditional Formatting
+  // -----------------------------------------------------------------------
+
+  const conditionTypeEnum = z.enum([
+    "greaterThan",
+    "lessThan",
+    "equal",
+    "notEqual",
+    "between",
+    "textContains",
+    "isEmpty",
+    "isNotEmpty",
+  ]);
+
+  mcp.tool(
+    "sheet_add_conditional_rule",
+    "Add a conditional formatting rule to a sheet",
+    {
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      range: cellRangeSchema.describe('Cell range, e.g. "A1:C10"'),
+      conditionType: conditionTypeEnum.describe("Condition type"),
+      conditionValues: z
+        .array(z.string().max(MAX_CELL_VALUE_LENGTH))
+        .max(2)
+        .optional()
+        .describe("Comparison values (e.g. threshold numbers)"),
+      format: z.object(formatSchema).strict().describe(
+        "Format to apply when matched",
+      ),
+    },
+    async (args: Any) => {
+      const rule = {
+        id: crypto.randomUUID(),
+        range: args.range,
+        condition: {
+          type: args.conditionType,
+          values: args.conditionValues ?? [],
+        },
+        format: args.format,
+      };
+      await store.addConditionalRule(args.spreadsheetId, args.sheetId, rule);
+      return json({ id: rule.id });
+    },
+  );
+
+  mcp.tool(
+    "sheet_remove_conditional_rule",
+    "Remove a conditional formatting rule",
+    {
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+      ruleId: idSchema.describe("Conditional rule ID"),
+    },
+    async (args: Any) => {
+      await store.removeConditionalRule(
+        args.spreadsheetId,
+        args.sheetId,
+        args.ruleId,
+      );
+      return text("Removed");
+    },
+  );
+
+  mcp.tool(
+    "sheet_list_conditional_rules",
+    "List conditional formatting rules for a sheet",
+    {
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
+    },
+    async (args: Any) => {
+      return json(
+        await store.listConditionalRules(args.spreadsheetId, args.sheetId),
+      );
+    },
+  );
+
+  // -----------------------------------------------------------------------
   // Export
   // -----------------------------------------------------------------------
 
@@ -404,8 +648,8 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_export_csv",
     "Export a sheet tab as CSV",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
-      sheetId: z.string().describe("Sheet tab ID"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
+      sheetId: idSchema.describe("Sheet tab ID"),
     },
     async (args: Any) => {
       return text(await store.exportCsv(args.spreadsheetId, args.sheetId));
@@ -416,7 +660,7 @@ export function createMcpServer(store: SpreadsheetStore): McpServer {
     "sheet_export_json",
     "Export the entire spreadsheet as JSON",
     {
-      spreadsheetId: z.string().describe("Spreadsheet ID"),
+      spreadsheetId: idSchema.describe("Spreadsheet ID"),
     },
     async (args: Any) => {
       return text(await store.exportJson(args.spreadsheetId));
