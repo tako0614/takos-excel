@@ -55,6 +55,8 @@ compute:
           clientId: OAUTH_CLIENT_ID
           clientSecret: OAUTH_CLIENT_SECRET
           issuer: OAUTH_ISSUER_URL
+          tokenEndpoint: OAUTH_TOKEN_URL
+          userinfoEndpoint: OAUTH_USERINFO_URL
     build:
       fromWorkflow:
         path: .takos/workflows/deploy.yml

@@ -34,6 +34,8 @@ function authConfig(env: AppRuntimeEnv) {
   return {
     required: flagEnabled(env, "APP_AUTH_REQUIRED"),
     issuer: envValue(env, "OAUTH_ISSUER_URL"),
+    tokenEndpoint: envValue(env, "OAUTH_TOKEN_URL"),
+    userinfoEndpoint: envValue(env, "OAUTH_USERINFO_URL"),
     clientId: envValue(env, "OAUTH_CLIENT_ID"),
     clientSecret: envValue(env, "OAUTH_CLIENT_SECRET"),
     sessionSecret: envValue(env, "APP_SESSION_SECRET"),
@@ -176,7 +178,9 @@ async function exchangeCode(
 ): Promise<string> {
   const config = authConfig(env);
   const issuer = config.issuer!;
-  const res = await fetch(`${issuer.replace(/\/$/, "")}/oauth/token`, {
+  const tokenEndpoint = config.tokenEndpoint ||
+    `${issuer.replace(/\/$/, "")}/oauth/token`;
+  const res = await fetch(tokenEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
@@ -199,8 +203,11 @@ async function exchangeCode(
 }
 
 async function fetchUserInfo(env: AppRuntimeEnv, accessToken: string) {
-  const issuer = authConfig(env).issuer!;
-  const res = await fetch(`${issuer.replace(/\/$/, "")}/oauth/userinfo`, {
+  const config = authConfig(env);
+  const issuer = config.issuer!;
+  const userinfoEndpoint = config.userinfoEndpoint ||
+    `${issuer.replace(/\/$/, "")}/oauth/userinfo`;
+  const res = await fetch(userinfoEndpoint, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`OAuth userinfo failed: ${res.status}`);
