@@ -2,56 +2,72 @@ name: takos-excel
 version: "0.1.0"
 
 publish:
-  - name: takos-api
-    publisher: takos
-    type: api-key
-    spec:
-      scopes:
-        - files:read
-        - files:write
-  - name: excel-oauth
-    publisher: takos
-    type: oauth-client
-    spec:
-      clientName: Takos Excel
-      redirectUris:
-        - /api/auth/callback
-      scopes:
-        - openid
-        - profile
-        - email
   - name: excel-ui
-    publisher: web
-    type: UiSurface
-    path: /
-    title: Excel
-    spec:
+    type: takos.ui-surface.v1
+    display:
+      title: Excel
       description: Takos spreadsheet editor
       icon: /icons/excel.svg
       category: office
       sortOrder: 20
+    outputs:
+      url:
+        kind: url
+        routeRef: ui
   - name: excel-mcp
-    publisher: web
-    type: McpServer
-    path: /mcp
-    title: Excel MCP
+    type: takos.mcp-server.v1
+    display:
+      title: Excel MCP
+    outputs:
+      url:
+        kind: url
+        routeRef: mcp
+    auth:
+      bearer:
+        secretRef: MCP_AUTH_TOKEN
     spec:
       transport: streamable-http
-      authSecretRef: MCP_AUTH_TOKEN
+  - name: excel-file-handler
+    type: takos.file-handler.v1
+    display:
+      title: Excel
+      description: Open Takos spreadsheet files
+    outputs:
+      url:
+        kind: url
+        routeRef: file-open
+    spec:
+      mimeTypes:
+        - application/vnd.takos.excel+json
+      extensions:
+        - .takossheet
 
 compute:
   web:
     icon: /icons/excel.svg
     readiness: /healthz
     env:
-      MCP_AUTH_REQUIRED: "1"
       APP_AUTH_REQUIRED: "1"
     consume:
-      - publication: takos-api
+      - publication: takos.api-key
+        as: takos-api
+        request:
+          scopes:
+            - files:read
+            - files:write
         env:
           endpoint: TAKOS_STORAGE_API_URL
           apiKey: TAKOS_STORAGE_ACCESS_TOKEN
-      - publication: excel-oauth
+      - publication: takos.oauth-client
+        as: excel-oauth
+        request:
+          clientName: Takos Excel
+          redirectUris:
+            - /api/auth/callback
+          scopes:
+            - openid
+            - profile
+            - email
         env:
           clientId: OAUTH_CLIENT_ID
           clientSecret: OAUTH_CLIENT_SECRET
@@ -73,9 +89,15 @@ resources:
     to: web
 
 routes:
-  - target: web
+  - id: ui
+    target: web
     path: /
-  - target: web
+  - id: api
+    target: web
     path: /api
-  - target: web
+  - id: mcp
+    target: web
     path: /mcp
+  - id: file-open
+    target: web
+    path: /files/:id

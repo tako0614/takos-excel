@@ -1,4 +1,7 @@
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import {
+  McpServer,
+  type ToolCallback,
+} from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { SpreadsheetStore } from "./spreadsheet-store.ts";
 import {
@@ -11,12 +14,29 @@ import {
   parseCellAddress,
 } from "./lib/cell-utils.ts";
 
-// deno-lint-ignore no-explicit-any
-type Any = any;
-
 export type McpServerOptions = {
   nativeRendering?: boolean;
 };
+
+type ToolArgs<Shape extends z.ZodRawShape> = z.objectOutputType<
+  Shape,
+  z.ZodTypeAny,
+  "passthrough"
+>;
+
+type ToolHandler<Shape extends z.ZodRawShape> = (
+  args: ToolArgs<Shape>,
+) => Promise<unknown> | unknown;
+
+function registerTool<Shape extends z.ZodRawShape>(
+  mcp: McpServer,
+  name: string,
+  description: string,
+  paramsSchema: Shape,
+  cb: ToolHandler<Shape>,
+) {
+  return mcp.tool(name, description, paramsSchema, cb as ToolCallback<Shape>);
+}
 
 function text(s: string) {
   return { content: [{ type: "text" as const, text: s }] };
@@ -107,30 +127,33 @@ export function createMcpServer(
   // Spreadsheet Management
   // -----------------------------------------------------------------------
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_list",
     "List all spreadsheets",
     {},
-    async (_args: Any) => {
+    async (_args) => {
       return json(await store.listSpreadsheets());
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_create",
     "Create a new spreadsheet",
     { title: titleSchema.describe("Spreadsheet title") },
-    async (args: Any) => {
+    async (args) => {
       const id = await store.createSpreadsheet(args.title);
       return json({ id });
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_get",
     "Get spreadsheet info (metadata + sheet names)",
     { id: idSchema.describe("Spreadsheet ID") },
-    async (args: Any) => {
+    async (args) => {
       const ss = await store.getSpreadsheet(args.id);
       return json({
         id: ss.id,
@@ -142,24 +165,26 @@ export function createMcpServer(
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_delete",
     "Delete a spreadsheet",
     { id: idSchema.describe("Spreadsheet ID") },
-    async (args: Any) => {
+    async (args) => {
       await store.deleteSpreadsheet(args.id);
       return text("Deleted");
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_set_title",
     "Rename a spreadsheet",
     {
       id: idSchema.describe("Spreadsheet ID"),
       title: titleSchema.describe("New title"),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.setSpreadsheetTitle(args.id, args.title);
       return text("OK");
     },
@@ -169,7 +194,8 @@ export function createMcpServer(
   // Sheet Tab Operations
   // -----------------------------------------------------------------------
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_add_tab",
     "Add a new sheet tab",
     {
@@ -178,26 +204,28 @@ export function createMcpServer(
         "Tab name (auto-generated if omitted)",
       ),
     },
-    async (args: Any) => {
+    async (args) => {
       const sheetId = await store.addTab(args.spreadsheetId, args.name);
       return json({ sheetId });
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_remove_tab",
     "Remove a sheet tab",
     {
       spreadsheetId: idSchema.describe("Spreadsheet ID"),
       sheetId: idSchema.describe("Sheet tab ID"),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.removeTab(args.spreadsheetId, args.sheetId);
       return text("Removed");
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_rename_tab",
     "Rename a sheet tab",
     {
@@ -205,7 +233,7 @@ export function createMcpServer(
       sheetId: idSchema.describe("Sheet tab ID"),
       name: titleSchema.describe("New tab name"),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.renameTab(args.spreadsheetId, args.sheetId, args.name);
       return text("OK");
     },
@@ -215,7 +243,8 @@ export function createMcpServer(
   // Cell Operations
   // -----------------------------------------------------------------------
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_get_cell",
     "Get a cell's value, computed result, and format",
     {
@@ -223,14 +252,15 @@ export function createMcpServer(
       sheetId: idSchema.describe("Sheet tab ID"),
       cell: cellAddressSchema.describe('Cell address, e.g. "A1"'),
     },
-    async (args: Any) => {
+    async (args) => {
       return json(
         await store.getCell(args.spreadsheetId, args.sheetId, args.cell),
       );
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_set_cell",
     "Set a cell's value or formula",
     {
@@ -241,7 +271,7 @@ export function createMcpServer(
         'Cell value or formula, e.g. "42" or "=SUM(A1:A10)"',
       ),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.setCell(
         args.spreadsheetId,
         args.sheetId,
@@ -252,7 +282,8 @@ export function createMcpServer(
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_get_range",
     "Get a range of cell values as a 2D array",
     {
@@ -260,14 +291,15 @@ export function createMcpServer(
       sheetId: idSchema.describe("Sheet tab ID"),
       range: cellRangeSchema.describe('Range, e.g. "A1:C10"'),
     },
-    async (args: Any) => {
+    async (args) => {
       return json(
         await store.getRange(args.spreadsheetId, args.sheetId, args.range),
       );
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_set_range",
     "Set a range of values from a 2D array",
     {
@@ -276,7 +308,7 @@ export function createMcpServer(
       startCell: cellAddressSchema.describe('Top-left cell, e.g. "A1"'),
       values: rangeValuesSchema.describe("2D array of string values"),
     },
-    async (args: Any) => {
+    async (args) => {
       const start = parseCellAddress(args.startCell);
       const maxWidth = Math.max(
         ...args.values.map((row: string[]) => row.length),
@@ -298,7 +330,8 @@ export function createMcpServer(
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_clear_range",
     "Clear all cells in a range",
     {
@@ -306,7 +339,7 @@ export function createMcpServer(
       sheetId: idSchema.describe("Sheet tab ID"),
       range: cellRangeSchema.describe('Range, e.g. "A1:C10"'),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.clearRange(args.spreadsheetId, args.sheetId, args.range);
       return text("Cleared");
     },
@@ -329,7 +362,8 @@ export function createMcpServer(
       .describe('Number format, e.g. "#,##0.00", "0%", "yyyy-mm-dd"'),
   };
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_format_cell",
     "Apply formatting to a cell",
     {
@@ -338,7 +372,7 @@ export function createMcpServer(
       cell: cellAddressSchema.describe('Cell address, e.g. "A1"'),
       format: z.object(formatSchema).strict().describe("Format options"),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.formatCell(
         args.spreadsheetId,
         args.sheetId,
@@ -349,7 +383,8 @@ export function createMcpServer(
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_format_range",
     "Apply formatting to a range of cells",
     {
@@ -358,7 +393,7 @@ export function createMcpServer(
       range: cellRangeSchema.describe('Range, e.g. "A1:C10"'),
       format: z.object(formatSchema).strict().describe("Format options"),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.formatRange(
         args.spreadsheetId,
         args.sheetId,
@@ -373,7 +408,8 @@ export function createMcpServer(
   // Formula & Computation
   // -----------------------------------------------------------------------
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_evaluate",
     "Evaluate a formula without storing it in any cell",
     {
@@ -381,7 +417,7 @@ export function createMcpServer(
       sheetId: idSchema.describe("Sheet tab ID"),
       formula: formulaSchema.describe('Formula, e.g. "=SUM(A1:A10)"'),
     },
-    async (args: Any) => {
+    async (args) => {
       const result = await store.evaluate(
         args.spreadsheetId,
         args.sheetId,
@@ -391,7 +427,8 @@ export function createMcpServer(
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_get_computed",
     "Get computed/evaluated values for a range",
     {
@@ -399,7 +436,7 @@ export function createMcpServer(
       sheetId: idSchema.describe("Sheet tab ID"),
       range: cellRangeSchema.describe('Range, e.g. "A1:C10"'),
     },
-    async (args: Any) => {
+    async (args) => {
       return json(
         await store.getComputed(args.spreadsheetId, args.sheetId, args.range),
       );
@@ -410,7 +447,8 @@ export function createMcpServer(
   // Column / Row Operations
   // -----------------------------------------------------------------------
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_set_column_width",
     "Set the width of a column",
     {
@@ -419,7 +457,7 @@ export function createMcpServer(
       column: columnSchema.describe('Column letter, e.g. "A"'),
       width: z.number().int().min(40).max(500).describe("Width in pixels"),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.setColumnWidth(
         args.spreadsheetId,
         args.sheetId,
@@ -430,7 +468,8 @@ export function createMcpServer(
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_set_row_height",
     "Set the height of a row",
     {
@@ -441,7 +480,7 @@ export function createMcpServer(
       ),
       height: z.number().int().min(18).max(200).describe("Height in pixels"),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.setRowHeight(
         args.spreadsheetId,
         args.sheetId,
@@ -456,7 +495,8 @@ export function createMcpServer(
   // Screenshot
   // -----------------------------------------------------------------------
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_screenshot",
     "Render a spreadsheet sheet as a PNG image showing the grid with values",
     {
@@ -491,7 +531,7 @@ export function createMcpServer(
         .optional()
         .describe("Image height in pixels (default: 800)"),
     },
-    async (args: Any) => {
+    async (args) => {
       try {
         const ss = await store.getSpreadsheet(args.spreadsheetId);
         const sheet = ss.sheets.find((s) => s.id === args.sheetId);
@@ -539,7 +579,8 @@ export function createMcpServer(
   // CSV Import
   // -----------------------------------------------------------------------
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_import_csv",
     "Import CSV content into a sheet",
     {
@@ -550,7 +591,7 @@ export function createMcpServer(
         .optional()
         .describe('Top-left cell to start import at (default "A1")'),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.importCsv(
         args.spreadsheetId,
         args.sheetId,
@@ -576,7 +617,8 @@ export function createMcpServer(
     "isNotEmpty",
   ]);
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_add_conditional_rule",
     "Add a conditional formatting rule to a sheet",
     {
@@ -593,7 +635,7 @@ export function createMcpServer(
         "Format to apply when matched",
       ),
     },
-    async (args: Any) => {
+    async (args) => {
       const rule = {
         id: crypto.randomUUID(),
         range: args.range,
@@ -608,7 +650,8 @@ export function createMcpServer(
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_remove_conditional_rule",
     "Remove a conditional formatting rule",
     {
@@ -616,7 +659,7 @@ export function createMcpServer(
       sheetId: idSchema.describe("Sheet tab ID"),
       ruleId: idSchema.describe("Conditional rule ID"),
     },
-    async (args: Any) => {
+    async (args) => {
       await store.removeConditionalRule(
         args.spreadsheetId,
         args.sheetId,
@@ -626,14 +669,15 @@ export function createMcpServer(
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_list_conditional_rules",
     "List conditional formatting rules for a sheet",
     {
       spreadsheetId: idSchema.describe("Spreadsheet ID"),
       sheetId: idSchema.describe("Sheet tab ID"),
     },
-    async (args: Any) => {
+    async (args) => {
       return json(
         await store.listConditionalRules(args.spreadsheetId, args.sheetId),
       );
@@ -644,25 +688,27 @@ export function createMcpServer(
   // Export
   // -----------------------------------------------------------------------
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_export_csv",
     "Export a sheet tab as CSV",
     {
       spreadsheetId: idSchema.describe("Spreadsheet ID"),
       sheetId: idSchema.describe("Sheet tab ID"),
     },
-    async (args: Any) => {
+    async (args) => {
       return text(await store.exportCsv(args.spreadsheetId, args.sheetId));
     },
   );
 
-  mcp.tool(
+  registerTool(
+    mcp,
     "sheet_export_json",
     "Export the entire spreadsheet as JSON",
     {
       spreadsheetId: idSchema.describe("Spreadsheet ID"),
     },
-    async (args: Any) => {
+    async (args) => {
       return text(await store.exportJson(args.spreadsheetId));
     },
   );

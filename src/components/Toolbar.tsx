@@ -1,6 +1,8 @@
 import { Component, createSignal, Show } from "solid-js";
 import type { JSX } from "solid-js";
 import type { CellFormat } from "../types";
+import { LanguageSwitcher } from "./LanguageSwitcher";
+import { useI18n } from "../i18n";
 
 interface ToolbarProps {
   format: CellFormat | undefined;
@@ -16,6 +18,7 @@ interface ToolbarProps {
 }
 
 export const Toolbar: Component<ToolbarProps> = (props) => {
+  const { t } = useI18n();
   const [showTextColor, setShowTextColor] = createSignal(false);
   const [showBgColor, setShowBgColor] = createSignal(false);
   const [editingTitle, setEditingTitle] = createSignal(false);
@@ -46,12 +49,12 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
 
   const fontSizes = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32];
 
-  const numberFormats = [
-    { label: "General", value: "" },
-    { label: "Number", value: "#,##0.00" },
-    { label: "Percent", value: "0%" },
-    { label: "Date", value: "yyyy-mm-dd" },
-    { label: "Currency", value: "$#,##0.00" },
+  const numberFormats = () => [
+    { label: t("general"), value: "" },
+    { label: t("number"), value: "#,##0.00" },
+    { label: t("percent"), value: "0%" },
+    { label: t("date"), value: "yyyy-mm-dd" },
+    { label: t("currency"), value: "$#,##0.00" },
   ];
 
   const ToolBtn = (btnProps: {
@@ -83,7 +86,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
         type="button"
         class="mr-2 flex h-7 w-7 items-center justify-center rounded text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
         onClick={props.onNavigateHome}
-        title="Back to list"
+        title={t("backToList")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -142,7 +145,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
       {/* Undo */}
       <ToolBtn
         onClick={() => props.onUndo?.()}
-        title="Undo (Ctrl+Z)"
+        title={t("undo")}
         active={false}
       >
         <svg
@@ -165,7 +168,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
       {/* Redo */}
       <ToolBtn
         onClick={() => props.onRedo?.()}
-        title="Redo (Ctrl+Y)"
+        title={t("redo")}
         active={false}
       >
         <svg
@@ -206,7 +209,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
           };
           input.click();
         }}
-        title="Import CSV"
+        title={t("importCsv")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -231,7 +234,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
       <ToolBtn
         active={fmt().bold}
         onClick={() => props.onFormatChange({ bold: !fmt().bold })}
-        title="Bold"
+        title={t("bold")}
       >
         <span class="font-bold">B</span>
       </ToolBtn>
@@ -240,7 +243,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
       <ToolBtn
         active={fmt().italic}
         onClick={() => props.onFormatChange({ italic: !fmt().italic })}
-        title="Italic"
+        title={t("italic")}
       >
         <span class="italic">I</span>
       </ToolBtn>
@@ -249,7 +252,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
       <ToolBtn
         active={fmt().underline}
         onClick={() => props.onFormatChange({ underline: !fmt().underline })}
-        title="Underline"
+        title={t("underline")}
       >
         <span class="underline">U</span>
       </ToolBtn>
@@ -262,10 +265,10 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
         value={fmt().fontSize ?? 13}
         onChange={(e) =>
           props.onFormatChange({ fontSize: Number(e.currentTarget.value) })}
-        title="Font size"
+        title={t("fontSize")}
       >
         {fontSizes.map((size) => (
-          <option key={size} value={size}>
+          <option value={size}>
             {size}
           </option>
         ))}
@@ -280,7 +283,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
             setShowTextColor(!showTextColor());
             setShowBgColor(false);
           }}
-          title="Text color"
+          title={t("textColor")}
         >
           <span
             class="text-sm font-bold"
@@ -310,7 +313,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
                 setShowTextColor(false);
               }}
             >
-              Reset
+              {t("reset")}
             </button>
           </div>
         </Show>
@@ -323,7 +326,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
             setShowBgColor(!showBgColor());
             setShowTextColor(false);
           }}
-          title="Background color"
+          title={t("backgroundColor")}
         >
           <div
             class="h-4 w-4 rounded"
@@ -354,7 +357,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
                 setShowBgColor(false);
               }}
             >
-              Reset
+              {t("reset")}
             </button>
           </div>
         </Show>
@@ -366,7 +369,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
       <ToolBtn
         active={fmt().textAlign === "left" || !fmt().textAlign}
         onClick={() => props.onFormatChange({ textAlign: "left" })}
-        title="Align left"
+        title={t("alignLeft")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -388,7 +391,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
       <ToolBtn
         active={fmt().textAlign === "center"}
         onClick={() => props.onFormatChange({ textAlign: "center" })}
-        title="Align center"
+        title={t("alignCenter")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -410,7 +413,7 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
       <ToolBtn
         active={fmt().textAlign === "right"}
         onClick={() => props.onFormatChange({ textAlign: "right" })}
-        title="Align right"
+        title={t("alignRight")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -440,14 +443,17 @@ export const Toolbar: Component<ToolbarProps> = (props) => {
           props.onFormatChange({
             numberFormat: e.currentTarget.value || undefined,
           })}
-        title="Number format"
+        title={t("numberFormat")}
       >
-        {numberFormats.map((nf) => (
-          <option key={nf.label} value={nf.value}>
+        {numberFormats().map((nf) => (
+          <option value={nf.value}>
             {nf.label}
           </option>
         ))}
       </select>
+
+      <div class="flex-1" />
+      <LanguageSwitcher />
     </div>
   );
 };

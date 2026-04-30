@@ -1,5 +1,6 @@
 import { Component } from "solid-js";
 import type { Spreadsheet } from "../types";
+import { dateLocale, useI18n } from "../i18n";
 
 interface SpreadsheetCardProps {
   spreadsheet: Spreadsheet;
@@ -8,9 +9,11 @@ interface SpreadsheetCardProps {
 }
 
 export const SpreadsheetCard: Component<SpreadsheetCardProps> = (props) => {
+  const { t } = useI18n();
+
   const formatDate = (iso: string) => {
     const d = new Date(iso);
-    return d.toLocaleDateString("en-US", {
+    return d.toLocaleDateString(dateLocale(), {
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -36,7 +39,7 @@ export const SpreadsheetCard: Component<SpreadsheetCardProps> = (props) => {
         type="button"
         class="absolute top-3 right-3 rounded-md p-1.5 text-neutral-500 opacity-0 transition-opacity hover:bg-neutral-700 hover:text-red-400 group-hover:opacity-100"
         onClick={props.onDelete}
-        title="Delete spreadsheet"
+        title={t("deleteSpreadsheetTitle")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -82,15 +85,19 @@ export const SpreadsheetCard: Component<SpreadsheetCardProps> = (props) => {
 
       <div class="mb-3 flex gap-3 text-xs text-neutral-400">
         <span>
-          {sheetCount()} sheet{sheetCount() !== 1 ? "s" : ""}
+          {t(sheetCount() === 1 ? "sheetCountSingular" : "sheetCount", {
+            count: sheetCount(),
+          })}
         </span>
         <span>
-          {cellCount()} cell{cellCount() !== 1 ? "s" : ""}
+          {t(cellCount() === 1 ? "cellCountSingular" : "cellCount", {
+            count: cellCount(),
+          })}
         </span>
       </div>
 
       <div class="mt-auto text-xs text-neutral-500">
-        Updated {formatDate(props.spreadsheet.updatedAt)}
+        {t("updated", { date: formatDate(props.spreadsheet.updatedAt) })}
       </div>
     </div>
   );

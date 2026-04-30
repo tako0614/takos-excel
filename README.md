@@ -45,19 +45,36 @@ canvas renderer can be loaded.
 
 The MCP server requires the following environment variables:
 
-| Variable                 | Description                                      | Default                 |
-| ------------------------ | ------------------------------------------------ | ----------------------- |
-| `TAKOS_API_URL`          | Takos platform API URL                           | `http://localhost:8787` |
-| `TAKOS_ACCESS_TOKEN`     | Access token for the storage API                 | (empty)                 |
-| `TAKOS_SPACE_ID`         | Space identifier                                 | (required)              |
-| `MCP_AUTH_TOKEN`         | Bearer token for `/mcp`                          | managed auto-secret     |
-| `MCP_AUTH_REQUIRED`      | Set `1` to fail closed when the token is missing | `0`                     |
-| `TAKOS_NATIVE_RENDERING` | Set `1` to enable native canvas screenshot tools | runtime-dependent       |
+| Variable                     | Description                                      | Default                 |
+| ---------------------------- | ------------------------------------------------ | ----------------------- |
+| `TAKOS_STORAGE_API_URL`      | Takos Storage API URL                            | `http://localhost:8787` |
+| `TAKOS_STORAGE_ACCESS_TOKEN` | Access token for the storage API                 | (required)              |
+| `TAKOS_SPACE_ID`             | Default space; request `space_id` overrides it   | (optional)              |
+| `APP_AUTH_REQUIRED`          | Set `1` to require app session auth              | `0`                     |
+| `APP_SESSION_SECRET`         | Secret for app session cookies                   | managed generated       |
+| `OAUTH_CLIENT_ID`            | Takos OAuth client ID                            | managed injected        |
+| `OAUTH_CLIENT_SECRET`        | Takos OAuth client secret                        | managed injected        |
+| `OAUTH_ISSUER_URL`           | Takos OAuth issuer URL                           | managed injected        |
+| `OAUTH_TOKEN_URL`            | Takos OAuth token endpoint                       | managed injected        |
+| `OAUTH_USERINFO_URL`         | Takos OAuth userinfo endpoint                    | managed injected        |
+| `MCP_AUTH_TOKEN`             | Bearer token for `/mcp`                          | managed auto-secret     |
+| `MCP_ALLOW_UNAUTHENTICATED`  | Set `1` to allow `/mcp` without a bearer token   | `0`                     |
+| `TAKOS_NATIVE_RENDERING`     | Set `1` to enable native canvas screenshot tools | runtime-dependent       |
 
 In managed Takos deploys, `.takos/app.yml` publishes `excel-mcp` with
-`spec.authSecretRef: MCP_AUTH_TOKEN` and sets `MCP_AUTH_REQUIRED=1`. Takos
-generates the `MCP_AUTH_TOKEN` service secret env when it is missing, and MCP
-clients resolve that token from the owner service.
+`auth.bearer.secretRef: MCP_AUTH_TOKEN`, injects storage credentials as
+`TAKOS_STORAGE_API_URL` / `TAKOS_STORAGE_ACCESS_TOKEN`, injects the Takos OAuth
+client env, and generates `APP_SESSION_SECRET`. Takos generates the
+`MCP_AUTH_TOKEN` service secret env when it is missing, and MCP clients resolve
+that token from the owner service. Local development can opt into
+unauthenticated `/mcp` access with `MCP_ALLOW_UNAUTHENTICATED=true` when no
+token is configured.
+
+The file handler opens `/files/:id` and the app reads/writes storage through the
+`space_id` or `spaceId` request query parameter when present. App-created
+spreadsheets use `.takossheet` with `application/vnd.takos.excel+json`; existing
+`takos-excel/*.json` files remain readable and keep the same internal JSON
+layout.
 
 ## Available MCP Tools
 

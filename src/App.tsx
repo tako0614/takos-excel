@@ -7,6 +7,7 @@ export default function App() {
     <>
       <Route path="/" component={SpreadsheetListPage} />
       <Route path="/sheet/:id" component={EditorPage} />
+      <Route path="/files/:id" component={EditorPage} />
     </>
   );
 }

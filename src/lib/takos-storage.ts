@@ -15,19 +15,29 @@
 export interface StorageFile {
   id: string;
   name: string;
+  path?: string;
   parentId?: string;
+  parent_id?: string | null;
   type: "file" | "folder";
   size?: number;
+  mimeType?: string | null;
+  mime_type?: string | null;
   createdAt: string;
+  created_at?: string;
   updatedAt: string;
+  updated_at?: string;
 }
 
 export interface TakosStorageClient {
   list(prefix?: string): Promise<StorageFile[]>;
   get(fileId: string): Promise<StorageFile | null>;
   getContent(fileId: string): Promise<string>;
-  putContent(fileId: string, content: string): Promise<void>;
-  create(name: string, parentId?: string): Promise<StorageFile>;
+  putContent(fileId: string, content: string, mimeType?: string): Promise<void>;
+  create(
+    name: string,
+    parentId?: string,
+    options?: { content?: string; mimeType?: string },
+  ): Promise<StorageFile>;
   createFolder(name: string, parentId?: string): Promise<StorageFile>;
   rename(fileId: string, name: string): Promise<void>;
   delete(fileId: string): Promise<void>;
@@ -39,6 +49,63 @@ export function createTakosStorageClient(
   spaceId: string,
 ): TakosStorageClient {
   const baseUrl = `${apiUrl}/api/spaces/${spaceId}/storage`;
+  const filePaths = new Map<string, string>();
+
+  function normalizeFile(raw: unknown): StorageFile {
+    const data = raw as Record<string, unknown>;
+    const file: StorageFile = {
+      id: String(data.id),
+      name: String(data.name),
+      path: typeof data.path === "string" ? data.path : undefined,
+      parentId: typeof data.parentId === "string"
+        ? data.parentId
+        : typeof data.parent_id === "string"
+        ? data.parent_id
+        : undefined,
+      parent_id: typeof data.parent_id === "string" ? data.parent_id : null,
+      type: data.type === "folder" ? "folder" : "file",
+      size: typeof data.size === "number" ? data.size : undefined,
+      mimeType: typeof data.mimeType === "string"
+        ? data.mimeType
+        : typeof data.mime_type === "string"
+        ? data.mime_type
+        : null,
+      mime_type: typeof data.mime_type === "string"
+        ? data.mime_type
+        : typeof data.mimeType === "string"
+        ? data.mimeType
+        : null,
+      createdAt: typeof data.createdAt === "string"
+        ? data.createdAt
+        : typeof data.created_at === "string"
+        ? data.created_at
+        : "",
+      created_at: typeof data.created_at === "string"
+        ? data.created_at
+        : undefined,
+      updatedAt: typeof data.updatedAt === "string"
+        ? data.updatedAt
+        : typeof data.updated_at === "string"
+        ? data.updated_at
+        : "",
+      updated_at: typeof data.updated_at === "string"
+        ? data.updated_at
+        : undefined,
+    };
+    if (file.path) filePaths.set(file.id, file.path);
+    return file;
+  }
+
+  function fileFromResponse(data: unknown): StorageFile {
+    const record = data as { file?: unknown; folder?: unknown };
+    return normalizeFile(record.file ?? record.folder ?? data);
+  }
+
+  function pathFor(name: string, parentId?: string): string {
+    const parentPath = parentId ? filePaths.get(parentId) : undefined;
+    if (!parentPath || parentPath === "/") return name;
+    return `${parentPath.replace(/\/$/, "")}/${name}`;
+  }
 
   async function fetchApi(
     path: string,
@@ -62,16 +129,16 @@ export function createTakosStorageClient(
   }
 
   async function list(prefix?: string): Promise<StorageFile[]> {
-    const query = prefix ? `?prefix=${encodeURIComponent(prefix)}` : "";
+    const query = prefix ? `?path=${encodeURIComponent(prefix)}` : "";
     const res = await fetchApi(query);
     const data = await res.json();
-    return (data.files ?? data) as StorageFile[];
+    return ((data.files ?? data) as unknown[]).map(normalizeFile);
   }
 
   async function get(fileId: string): Promise<StorageFile | null> {
     try {
       const res = await fetchApi(`/${fileId}`);
-      return (await res.json()) as StorageFile;
+      return fileFromResponse(await res.json());
     } catch {
       return null;
     }
@@ -79,23 +146,42 @@ export function createTakosStorageClient(
 
   async function getContent(fileId: string): Promise<string> {
     const res = await fetchApi(`/${fileId}/content`);
+    const contentType = res.headers.get("Content-Type") ?? "";
+    if (contentType.includes("application/json")) {
+      const data = await res.json();
+      if (typeof data.content === "string") return data.content;
+      return JSON.stringify(data);
+    }
     return res.text();
   }
 
-  async function putContent(fileId: string, content: string): Promise<void> {
+  async function putContent(
+    fileId: string,
+    content: string,
+    mimeType?: string,
+  ): Promise<void> {
     await fetchApi(`/${fileId}/content`, {
       method: "PUT",
-      body: content,
-      headers: { "Content-Type": "text/plain" },
+      body: JSON.stringify({ content, mime_type: mimeType }),
     });
   }
 
-  async function create(name: string, parentId?: string): Promise<StorageFile> {
+  async function create(
+    name: string,
+    parentId?: string,
+    options?: { content?: string; mimeType?: string },
+  ): Promise<StorageFile> {
     const res = await fetchApi("/files", {
       method: "POST",
-      body: JSON.stringify({ name, parentId }),
+      body: JSON.stringify({
+        name,
+        parentId,
+        path: pathFor(name, parentId),
+        content: options?.content ?? "",
+        mime_type: options?.mimeType,
+      }),
     });
-    return (await res.json()) as StorageFile;
+    return fileFromResponse(await res.json());
   }
 
   async function createFolder(
@@ -104,9 +190,13 @@ export function createTakosStorageClient(
   ): Promise<StorageFile> {
     const res = await fetchApi("/folders", {
       method: "POST",
-      body: JSON.stringify({ name, parentId }),
+      body: JSON.stringify({
+        name,
+        parentId,
+        parent_path: parentId ? filePaths.get(parentId) : undefined,
+      }),
     });
-    return (await res.json()) as StorageFile;
+    return fileFromResponse(await res.json());
   }
 
   async function rename(fileId: string, name: string): Promise<void> {

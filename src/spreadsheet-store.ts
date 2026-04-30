@@ -1,8 +1,9 @@
 /**
  * SpreadsheetStore backed by the takos platform storage API.
  *
- * Each spreadsheet is stored as a JSON file under a `/takos-excel/` folder:
- *   - File name: `{id}.json`
+ * Each spreadsheet is stored under a `/takos-excel/` folder:
+ *   - Current file name: `{id}.takossheet`
+ *   - Legacy file name: `{id}.json`
  *   - Content: full Spreadsheet object serialised as JSON
  *
  * The store keeps an in-memory cache that is hydrated on first access
@@ -30,6 +31,9 @@ import { parseCsv } from "./lib/csv-parser.ts";
 import type { TakosStorageClient } from "./lib/takos-storage.ts";
 
 const FOLDER_NAME = "takos-excel";
+const FILE_EXTENSION = ".takossheet";
+const LEGACY_FILE_EXTENSION = ".json";
+const MIME_TYPE = "application/vnd.takos.excel+json";
 
 // ---------------------------------------------------------------------------
 // SpreadsheetStore
@@ -44,6 +48,33 @@ export class SpreadsheetStore {
 
   constructor(client: TakosStorageClient) {
     this.client = client;
+  }
+
+  private findEntry(idOrFileId: string):
+    | { ss: Spreadsheet; fileId: string }
+    | undefined {
+    return this.cache.get(idOrFileId) ??
+      [...this.cache.values()].find((entry) => entry.fileId === idOrFileId);
+  }
+
+  private isSupportedFile(file: { name: string; mimeType?: string | null }) {
+    return file.name.endsWith(FILE_EXTENSION) ||
+      file.name.endsWith(LEGACY_FILE_EXTENSION) ||
+      file.mimeType === MIME_TYPE;
+  }
+
+  private async loadFile(fileId: string): Promise<
+    { ss: Spreadsheet; fileId: string } | undefined
+  > {
+    const file = await this.client.get(fileId);
+    if (!file || file.type !== "file" || !this.isSupportedFile(file)) {
+      return undefined;
+    }
+    const raw = await this.client.getContent(file.id);
+    const ss = JSON.parse(raw) as Spreadsheet;
+    const entry = { ss, fileId: file.id };
+    this.cache.set(ss.id, entry);
+    return entry;
   }
 
   // -----------------------------------------------------------------------
@@ -66,11 +97,9 @@ export class SpreadsheetStore {
 
     const allFiles = await this.client.list(FOLDER_NAME);
     for (const file of allFiles) {
-      if (file.type !== "file" || !file.name.endsWith(".json")) continue;
+      if (file.type !== "file" || !this.isSupportedFile(file)) continue;
       try {
-        const raw = await this.client.getContent(file.id);
-        const ss = JSON.parse(raw) as Spreadsheet;
-        this.cache.set(ss.id, { ss, fileId: file.id });
+        await this.loadFile(file.id);
       } catch {
         console.warn(
           `[takos-excel] Skipping unreadable file: ${file.name}`,
@@ -82,9 +111,13 @@ export class SpreadsheetStore {
   }
 
   private async persist(id: string): Promise<void> {
-    const entry = this.cache.get(id);
+    const entry = this.findEntry(id);
     if (!entry) return;
-    await this.client.putContent(entry.fileId, JSON.stringify(entry.ss));
+    await this.client.putContent(
+      entry.fileId,
+      JSON.stringify(entry.ss),
+      MIME_TYPE,
+    );
   }
 
   private touch(ss: Spreadsheet): void {
@@ -129,47 +162,51 @@ export class SpreadsheetStore {
     };
 
     const file = await this.client.create(
-      `${id}.json`,
+      `${id}${FILE_EXTENSION}`,
       this.folderId ?? undefined,
+      { content: JSON.stringify(ss), mimeType: MIME_TYPE },
     );
-    await this.client.putContent(file.id, JSON.stringify(ss));
     this.cache.set(id, { ss, fileId: file.id });
     return id;
   }
 
   async getSpreadsheet(id: string): Promise<Spreadsheet> {
     await this.ensureInitialized();
-    const entry = this.cache.get(id);
+    const entry = this.findEntry(id) ?? await this.loadFile(id);
     if (!entry) throw new Error(`Spreadsheet not found: ${id}`);
     return entry.ss;
   }
 
   async deleteSpreadsheet(id: string): Promise<void> {
     await this.ensureInitialized();
-    const entry = this.cache.get(id);
+    const entry = this.findEntry(id);
     if (!entry) throw new Error(`Spreadsheet not found: ${id}`);
     await this.client.delete(entry.fileId);
-    this.cache.delete(id);
+    this.cache.delete(entry.ss.id);
   }
 
   async replaceSpreadsheet(spreadsheet: Spreadsheet): Promise<Spreadsheet> {
     await this.ensureInitialized();
-    const entry = this.cache.get(spreadsheet.id);
+    const entry = this.findEntry(spreadsheet.id);
     const updated = {
       ...spreadsheet,
       updatedAt: spreadsheet.updatedAt || new Date().toISOString(),
     };
     if (entry) {
       entry.ss = updated;
-      await this.client.putContent(entry.fileId, JSON.stringify(updated));
+      await this.client.putContent(
+        entry.fileId,
+        JSON.stringify(updated),
+        MIME_TYPE,
+      );
       return updated;
     }
 
     const file = await this.client.create(
-      `${updated.id}.json`,
+      `${updated.id}${FILE_EXTENSION}`,
       this.folderId ?? undefined,
+      { content: JSON.stringify(updated), mimeType: MIME_TYPE },
     );
-    await this.client.putContent(file.id, JSON.stringify(updated));
     this.cache.set(updated.id, { ss: updated, fileId: file.id });
     return updated;
   }

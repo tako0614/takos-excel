@@ -6,10 +6,13 @@ import {
   loadSpreadsheetsFromApi,
 } from "../lib/storage";
 import { SpreadsheetCard } from "../components/SpreadsheetCard";
+import { LanguageSwitcher } from "../components/LanguageSwitcher";
+import { useI18n } from "../i18n";
 import type { Spreadsheet } from "../types";
 
 export const SpreadsheetListPage: Component = () => {
   const navigate = useNavigate();
+  const { t } = useI18n();
   const [spreadsheets, setSpreadsheets] = createSignal<Spreadsheet[]>([]);
   const [isLoading, setIsLoading] = createSignal(true);
   const [showNewDialog, setShowNewDialog] = createSignal(false);
@@ -23,8 +26,12 @@ export const SpreadsheetListPage: Component = () => {
   });
 
   const handleCreate = () => {
-    const title = newTitle().trim() || "Untitled Spreadsheet";
-    const ss = createSpreadsheet(title);
+    const title = newTitle().trim() || t("untitledSpreadsheet");
+    const result = createSpreadsheet(title, t("defaultSheetName"));
+    const ss = result.value;
+    void result.remote.catch((error) => {
+      console.error("[takos-excel] Failed to save spreadsheet", error);
+    });
     setShowNewDialog(false);
     setNewTitle("");
     navigate(`/sheet/${ss.id}`);
@@ -32,8 +39,10 @@ export const SpreadsheetListPage: Component = () => {
 
   const handleDelete = (e: Event, id: string) => {
     e.stopPropagation();
-    if (confirm("Delete this spreadsheet?")) {
-      deleteSpreadsheet(id);
+    if (confirm(t("deleteSpreadsheetConfirm"))) {
+      void deleteSpreadsheet(id).catch((error) => {
+        console.error("[takos-excel] Failed to delete spreadsheet", error);
+      });
       setSpreadsheets((prev) => prev.filter((ss) => ss.id !== id));
     }
   };
@@ -46,30 +55,33 @@ export const SpreadsheetListPage: Component = () => {
           <div>
             <h1 class="text-xl font-bold text-neutral-100">Takos Excel</h1>
             <p class="mt-0.5 text-sm text-neutral-500">
-              Spreadsheet editor
+              {t("spreadsheetEditor")}
             </p>
           </div>
-          <button
-            type="button"
-            class="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
-            onClick={() => setShowNewDialog(true)}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
+          <div class="flex items-center gap-3">
+            <LanguageSwitcher />
+            <button
+              type="button"
+              class="flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
+              onClick={() => setShowNewDialog(true)}
             >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            New Spreadsheet
-          </button>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              {t("newSpreadsheetButton")}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -108,17 +120,17 @@ export const SpreadsheetListPage: Component = () => {
                   </svg>
                 </div>
                 <h2 class="mb-2 text-lg font-semibold text-neutral-200">
-                  No spreadsheets yet
+                  {t("noSpreadsheetsTitle")}
                 </h2>
                 <p class="mb-6 text-sm text-neutral-500">
-                  Create your first spreadsheet to get started.
+                  {t("noSpreadsheetsDescription")}
                 </p>
                 <button
                   type="button"
                   class="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-emerald-500"
                   onClick={() => setShowNewDialog(true)}
                 >
-                  Create Spreadsheet
+                  {t("createSpreadsheet")}
                 </button>
               </div>
             </Show>
@@ -149,11 +161,11 @@ export const SpreadsheetListPage: Component = () => {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 class="mb-4 text-lg font-semibold text-neutral-100">
-              New Spreadsheet
+              {t("newSpreadsheet")}
             </h2>
             <input
               class="mb-4 w-full rounded-lg border border-neutral-600 bg-neutral-900 px-3 py-2 text-sm text-neutral-100 outline-none focus:border-emerald-500"
-              placeholder="Spreadsheet title"
+              placeholder={t("spreadsheetTitlePlaceholder")}
               value={newTitle()}
               onInput={(e) => setNewTitle(e.currentTarget.value)}
               onKeyDown={(e) => {
@@ -168,14 +180,14 @@ export const SpreadsheetListPage: Component = () => {
                 class="rounded-lg px-4 py-2 text-sm text-neutral-400 hover:text-neutral-200"
                 onClick={() => setShowNewDialog(false)}
               >
-                Cancel
+                {t("cancel")}
               </button>
               <button
                 type="button"
                 class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500"
                 onClick={handleCreate}
               >
-                Create
+                {t("create")}
               </button>
             </div>
           </div>

@@ -3,11 +3,27 @@ import type { Sheet, Spreadsheet } from "../types/index.ts";
 const STORAGE_KEY = "takos-excel-spreadsheets";
 const API_SPREADSHEETS_PATH = "/api/spreadsheets";
 
+export interface LocalSaveResult<T> {
+  value: T;
+  remote: Promise<unknown>;
+}
+
 function redirectToLogin(): void {
   const location = globalThis.location;
   if (!location) return;
   const returnTo = `${location.pathname}${location.search}${location.hash}`;
   location.href = `/api/auth/login?return_to=${encodeURIComponent(returnTo)}`;
+}
+
+function withCurrentSpaceId(path: string): string {
+  const query = globalThis.location
+    ? new URLSearchParams(globalThis.location.search)
+    : null;
+  const spaceId = query?.get("space_id") ?? query?.get("spaceId");
+  if (!spaceId) return path;
+  const url = new URL(path, globalThis.location.origin);
+  url.searchParams.set("space_id", spaceId);
+  return `${url.pathname}${url.search}`;
 }
 
 export function clearSpreadsheetsCache(): void {
@@ -18,7 +34,7 @@ async function requestJson<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(path, {
+  const response = await fetch(withCurrentSpaceId(path), {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -36,32 +52,49 @@ async function requestJson<T>(
   return await response.json() as T;
 }
 
-function syncSpreadsheetToApi(spreadsheet: Spreadsheet): void {
-  void requestJson<Spreadsheet>(
+function syncSpreadsheetToApi(spreadsheet: Spreadsheet): Promise<Spreadsheet> {
+  return requestJson<Spreadsheet>(
     `${API_SPREADSHEETS_PATH}/${encodeURIComponent(spreadsheet.id)}`,
     {
       method: "PUT",
       body: JSON.stringify(spreadsheet),
     },
-  ).catch(() => undefined);
+  );
 }
 
-function deleteSpreadsheetFromApi(id: string): void {
-  void fetch(`${API_SPREADSHEETS_PATH}/${encodeURIComponent(id)}`, {
-    method: "DELETE",
-    credentials: "same-origin",
-  }).then((response) => {
-    if (response.status === 401) {
-      clearSpreadsheetsCache();
-      redirectToLogin();
-    }
-  }).catch(() => undefined);
+async function deleteSpreadsheetFromApi(id: string): Promise<void> {
+  const response = await fetch(
+    withCurrentSpaceId(`${API_SPREADSHEETS_PATH}/${encodeURIComponent(id)}`),
+    {
+      method: "DELETE",
+      credentials: "same-origin",
+    },
+  );
+  if (response.status === 401) {
+    clearSpreadsheetsCache();
+    redirectToLogin();
+  }
+  if (!response.ok) {
+    throw new Error(`Request failed: ${response.status}`);
+  }
 }
 
 export async function loadSpreadsheetsFromApi(): Promise<Spreadsheet[]> {
   const spreadsheets = await requestJson<Spreadsheet[]>(API_SPREADSHEETS_PATH);
   saveSpreadsheets(spreadsheets);
   return spreadsheets;
+}
+
+export async function loadSpreadsheetFromApi(id: string): Promise<Spreadsheet> {
+  const spreadsheet = await requestJson<Spreadsheet>(
+    `${API_SPREADSHEETS_PATH}/${encodeURIComponent(id)}`,
+  );
+  const spreadsheets = loadSpreadsheets();
+  const index = spreadsheets.findIndex((entry) => entry.id === spreadsheet.id);
+  if (index >= 0) spreadsheets[index] = spreadsheet;
+  else spreadsheets.push(spreadsheet);
+  saveSpreadsheets(spreadsheets);
+  return spreadsheet;
 }
 
 /**
@@ -95,12 +128,15 @@ export function getSpreadsheet(id: string): Spreadsheet | undefined {
 /**
  * Create a new spreadsheet
  */
-export function createSpreadsheet(title: string): Spreadsheet {
+export function createSpreadsheet(
+  title: string,
+  defaultSheetName = "Sheet1",
+): LocalSaveResult<Spreadsheet> {
   const now = new Date().toISOString();
   const sheetId = crypto.randomUUID();
   const defaultSheet: Sheet = {
     id: sheetId,
-    name: "Sheet1",
+    name: defaultSheetName,
     cells: {},
     colWidths: {},
     rowHeights: {},
@@ -118,44 +154,49 @@ export function createSpreadsheet(title: string): Spreadsheet {
   const all = loadSpreadsheets();
   all.push(spreadsheet);
   saveSpreadsheets(all);
-  syncSpreadsheetToApi(spreadsheet);
-  return spreadsheet;
+  return { value: spreadsheet, remote: syncSpreadsheetToApi(spreadsheet) };
 }
 
 /**
  * Update an existing spreadsheet
  */
-export function updateSpreadsheet(spreadsheet: Spreadsheet): void {
+export function updateSpreadsheet(
+  spreadsheet: Spreadsheet,
+): Promise<Spreadsheet | undefined> {
   const all = loadSpreadsheets();
   const index = all.findIndex((s) => s.id === spreadsheet.id);
   if (index !== -1) {
     all[index] = { ...spreadsheet, updatedAt: new Date().toISOString() };
     saveSpreadsheets(all);
-    syncSpreadsheetToApi(all[index]);
+    return syncSpreadsheetToApi(all[index]);
   }
+  return Promise.resolve(undefined);
 }
 
 /**
  * Delete a spreadsheet by ID
  */
-export function deleteSpreadsheet(id: string): void {
+export function deleteSpreadsheet(id: string): Promise<void> {
   const all = loadSpreadsheets();
   saveSpreadsheets(all.filter((s) => s.id !== id));
-  deleteSpreadsheetFromApi(id);
+  return deleteSpreadsheetFromApi(id);
 }
 
 /**
  * Add a sheet to a spreadsheet
  */
-export function addSheet(spreadsheetId: string): Sheet | undefined {
+export function addSheet(
+  spreadsheetId: string,
+  sheetName?: string,
+): LocalSaveResult<Sheet | undefined> {
   const all = loadSpreadsheets();
   const ss = all.find((s) => s.id === spreadsheetId);
-  if (!ss) return undefined;
+  if (!ss) return { value: undefined, remote: Promise.resolve() };
 
   const sheetNum = ss.sheets.length + 1;
   const newSheet: Sheet = {
     id: crypto.randomUUID(),
-    name: `Sheet${sheetNum}`,
+    name: sheetName ?? `Sheet${sheetNum}`,
     cells: {},
     colWidths: {},
     rowHeights: {},
@@ -165,8 +206,7 @@ export function addSheet(spreadsheetId: string): Sheet | undefined {
   ss.activeSheetId = newSheet.id;
   ss.updatedAt = new Date().toISOString();
   saveSpreadsheets(all);
-  syncSpreadsheetToApi(ss);
-  return newSheet;
+  return { value: newSheet, remote: syncSpreadsheetToApi(ss) };
 }
 
 /**
@@ -175,10 +215,12 @@ export function addSheet(spreadsheetId: string): Sheet | undefined {
 export function deleteSheet(
   spreadsheetId: string,
   sheetId: string,
-): boolean {
+): LocalSaveResult<boolean> {
   const all = loadSpreadsheets();
   const ss = all.find((s) => s.id === spreadsheetId);
-  if (!ss || ss.sheets.length <= 1) return false;
+  if (!ss || ss.sheets.length <= 1) {
+    return { value: false, remote: Promise.resolve() };
+  }
 
   ss.sheets = ss.sheets.filter((s) => s.id !== sheetId);
   if (ss.activeSheetId === sheetId) {
@@ -186,8 +228,7 @@ export function deleteSheet(
   }
   ss.updatedAt = new Date().toISOString();
   saveSpreadsheets(all);
-  syncSpreadsheetToApi(ss);
-  return true;
+  return { value: true, remote: syncSpreadsheetToApi(ss) };
 }
 
 /**
@@ -197,17 +238,16 @@ export function renameSheet(
   spreadsheetId: string,
   sheetId: string,
   newName: string,
-): boolean {
+): LocalSaveResult<boolean> {
   const all = loadSpreadsheets();
   const ss = all.find((s) => s.id === spreadsheetId);
-  if (!ss) return false;
+  if (!ss) return { value: false, remote: Promise.resolve() };
 
   const sheet = ss.sheets.find((s) => s.id === sheetId);
-  if (!sheet) return false;
+  if (!sheet) return { value: false, remote: Promise.resolve() };
 
   sheet.name = newName;
   ss.updatedAt = new Date().toISOString();
   saveSpreadsheets(all);
-  syncSpreadsheetToApi(ss);
-  return true;
+  return { value: true, remote: syncSpreadsheetToApi(ss) };
 }

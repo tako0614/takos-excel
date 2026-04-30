@@ -1,5 +1,6 @@
 import { Component, createSignal, For, Show } from "solid-js";
 import type { Sheet, Spreadsheet } from "../types";
+import { useI18n } from "../i18n";
 
 interface SheetTabsProps {
   spreadsheet: Spreadsheet;
@@ -11,6 +12,7 @@ interface SheetTabsProps {
 }
 
 export const SheetTabs: Component<SheetTabsProps> = (props) => {
+  const { t } = useI18n();
   const [contextMenu, setContextMenu] = createSignal<
     {
       x: number;
@@ -97,7 +99,7 @@ export const SheetTabs: Component<SheetTabsProps> = (props) => {
         type="button"
         class="flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200"
         onClick={props.onAddSheet}
-        title="Add sheet"
+        title={t("addSheet")}
       >
         <svg
           xmlns="http://www.w3.org/2000/svg"
@@ -135,14 +137,14 @@ export const SheetTabs: Component<SheetTabsProps> = (props) => {
                 if (sheet) startRename(sheet);
               }}
             >
-              Rename
+              {t("rename")}
             </div>
             <Show when={props.spreadsheet.sheets.length > 1}>
               <div
                 class="context-menu-item text-red-400"
                 onClick={() => handleDelete(menu().sheetId)}
               >
-                Delete
+                {t("delete")}
               </div>
             </Show>
           </div>

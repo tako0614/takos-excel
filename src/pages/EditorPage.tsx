@@ -5,7 +5,7 @@ import {
   addSheet,
   deleteSheet,
   getSpreadsheet,
-  loadSpreadsheetsFromApi,
+  loadSpreadsheetFromApi,
   renameSheet,
   updateSpreadsheet,
 } from "../lib/storage";
@@ -17,10 +17,12 @@ import { Grid } from "../components/Grid";
 import { Toolbar } from "../components/Toolbar";
 import { FormulaBar } from "../components/FormulaBar";
 import { SheetTabs } from "../components/SheetTabs";
+import { useI18n } from "../i18n";
 
 export const EditorPage: Component = () => {
   const params = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useI18n();
 
   const [spreadsheet, setSpreadsheet] = createSignal<Spreadsheet | null>(null);
   const [selectedCell, setSelectedCell] = createSignal("A1");
@@ -74,12 +76,8 @@ export const EditorPage: Component = () => {
 
   // Load spreadsheet on mount
   onMount(() => {
-    void loadSpreadsheetsFromApi()
-      .then((spreadsheets) => {
-        const remote = spreadsheets.find((entry) => entry.id === params.id);
-        if (remote) setSpreadsheetForEditing(remote);
-        else if (!spreadsheet()) navigate("/");
-      })
+    void loadSpreadsheetFromApi(params.id)
+      .then((remote) => setSpreadsheetForEditing(remote))
       .catch(() => {
         if (!spreadsheet()) navigate("/");
       });
@@ -124,7 +122,9 @@ export const EditorPage: Component = () => {
   // Save spreadsheet to localStorage
   const save = (ss: Spreadsheet) => {
     setSpreadsheet({ ...ss });
-    updateSpreadsheet(ss);
+    void updateSpreadsheet(ss).catch((error) => {
+      console.error("[takos-excel] Failed to save spreadsheet", error);
+    });
   };
 
   // Update cells in active sheet
@@ -337,7 +337,14 @@ export const EditorPage: Component = () => {
   const handleAddSheet = () => {
     const ss = spreadsheet();
     if (!ss) return;
-    const newSheet = addSheet(ss.id);
+    const result = addSheet(
+      ss.id,
+      t("newSheetName", { number: ss.sheets.length + 1 }),
+    );
+    const newSheet = result.value;
+    void result.remote.catch((error) => {
+      console.error("[takos-excel] Failed to add sheet", error);
+    });
     if (newSheet) {
       const reloaded = getSpreadsheet(ss.id);
       if (reloaded) {
@@ -351,7 +358,10 @@ export const EditorPage: Component = () => {
   const handleRenameSheet = (sheetId: string, newName: string) => {
     const ss = spreadsheet();
     if (!ss) return;
-    renameSheet(ss.id, sheetId, newName);
+    const result = renameSheet(ss.id, sheetId, newName);
+    void result.remote.catch((error) => {
+      console.error("[takos-excel] Failed to rename sheet", error);
+    });
     const reloaded = getSpreadsheet(ss.id);
     if (reloaded) setSpreadsheet(reloaded);
   };
@@ -360,8 +370,11 @@ export const EditorPage: Component = () => {
     const ss = spreadsheet();
     if (!ss) return;
     if (ss.sheets.length <= 1) return;
-    if (confirm("Delete this sheet?")) {
-      deleteSheet(ss.id, sheetId);
+    if (confirm(t("deleteSheetConfirm"))) {
+      const result = deleteSheet(ss.id, sheetId);
+      void result.remote.catch((error) => {
+        console.error("[takos-excel] Failed to delete sheet", error);
+      });
       const reloaded = getSpreadsheet(ss.id);
       if (reloaded) {
         setSpreadsheet(reloaded);
@@ -392,7 +405,7 @@ export const EditorPage: Component = () => {
         when={spreadsheet()}
         fallback={
           <div class="flex h-screen items-center justify-center text-neutral-500">
-            Loading...
+            {t("loading")}
           </div>
         }
       >

@@ -131,6 +131,7 @@ export default {
     const url = new URL(request.url);
     if (
       url.pathname.startsWith("/api/") ||
+      url.pathname.startsWith("/files/") ||
       url.pathname === "/mcp" ||
       url.pathname === "/health" ||
       url.pathname === "/healthz"

@@ -40,29 +40,56 @@ function envFlagEnabled(env: ExcelRuntimeEnv, name: string): boolean {
   return value ? ["1", "true", "yes"].includes(value.toLowerCase()) : false;
 }
 
-function authorizeMcpRequest(
-  request: Request,
-  authToken?: string,
-): Response | null {
-  if (!authToken) return null;
-  const header = request.headers.get("Authorization");
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
-  if (token === authToken) return null;
-  return new Response(JSON.stringify({ error: "Unauthorized" }), {
-    status: 401,
-    headers: { "Content-Type": "application/json" },
-  });
+async function constantTimeEqual(
+  left: string,
+  right: string,
+): Promise<boolean> {
+  const [leftDigest, rightDigest] = await Promise.all([
+    crypto.subtle.digest("SHA-256", new TextEncoder().encode(left)),
+    crypto.subtle.digest("SHA-256", new TextEncoder().encode(right)),
+  ]);
+  const leftBytes = new Uint8Array(leftDigest);
+  const rightBytes = new Uint8Array(rightDigest);
+  let diff = leftBytes.length ^ rightBytes.length;
+  for (
+    let index = 0;
+    index < leftBytes.length && index < rightBytes.length;
+    index++
+  ) {
+    diff |= leftBytes[index] ^ rightBytes[index];
+  }
+  return diff === 0;
 }
 
 function mcpAuthMisconfigured(
-  required: boolean,
   authToken?: string,
+  allowUnauthenticated = false,
 ): Response | null {
-  if (!required || authToken) return null;
+  if (authToken || allowUnauthenticated) return null;
   return new Response(JSON.stringify({ error: "MCP_AUTH_TOKEN is required" }), {
     status: 503,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+async function authorizeMcpRequest(
+  request: Request,
+  authToken?: string,
+  allowUnauthenticated = false,
+): Promise<Response | null> {
+  const configError = mcpAuthMisconfigured(authToken, allowUnauthenticated);
+  if (configError) return configError;
+  if (!authToken) return null;
+
+  const header = request.headers.get("Authorization");
+  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
+  if (!token || !(await constantTimeEqual(token, authToken))) {
+    return new Response(JSON.stringify({ error: "Unauthorized" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  return null;
 }
 
 async function readBoundedJsonRequest(
@@ -108,23 +135,32 @@ async function readBoundedJsonRequest(
 }
 
 export function createServerApp(
-  store: SpreadsheetStore,
+  store: SpreadsheetStore | null,
   options: {
     env?: ExcelRuntimeEnv;
     nativeRendering?: boolean;
     mcpAuthToken?: string;
-    mcpAuthRequired?: boolean;
+    mcpAllowUnauthenticated?: boolean;
+    storeForRequest?: (c: Context) => SpreadsheetStore | Response;
   } = {},
 ) {
   const app = new Hono();
   const runtimeEnv = options.env ?? denoEnv();
-  const mcpAuthRequired = options.mcpAuthRequired === true;
   const mcpAuthToken = options.mcpAuthToken;
+  const mcpAllowUnauthenticated = options.mcpAllowUnauthenticated === true;
+  const currentStore = (c: Context): SpreadsheetStore | Response => {
+    if (options.storeForRequest) return options.storeForRequest(c);
+    if (!store) return c.json({ error: "space_id is required" }, 400);
+    return store;
+  };
 
   const health = (c: Context) => {
     const authError = appAuthMisconfigured(runtimeEnv);
     if (authError) return authError;
-    const mcpAuthError = mcpAuthMisconfigured(mcpAuthRequired, mcpAuthToken);
+    const mcpAuthError = mcpAuthMisconfigured(
+      mcpAuthToken,
+      mcpAllowUnauthenticated,
+    );
     if (mcpAuthError) return mcpAuthError;
     return c.json({ status: "ok" });
   };
@@ -143,6 +179,8 @@ export function createServerApp(
     await next();
   });
   app.get("/api/spreadsheets", async (c) => {
+    const store = currentStore(c);
+    if (store instanceof Response) return store;
     const summaries = await store.listSpreadsheets();
     const spreadsheets = await Promise.all(
       summaries.map((entry) => store.getSpreadsheet(entry.id)),
@@ -150,6 +188,8 @@ export function createServerApp(
     return c.json(spreadsheets);
   });
   app.post("/api/spreadsheets", async (c) => {
+    const store = currentStore(c);
+    if (store instanceof Response) return store;
     const body = await c.req.json<Partial<Spreadsheet>>();
     if (body.id && body.title && body.sheets && body.activeSheetId) {
       return c.json(await store.replaceSpreadsheet(body as Spreadsheet), 201);
@@ -160,6 +200,8 @@ export function createServerApp(
     return c.json(await store.getSpreadsheet(id), 201);
   });
   app.get("/api/spreadsheets/:id", async (c) => {
+    const store = currentStore(c);
+    if (store instanceof Response) return store;
     try {
       return c.json(await store.getSpreadsheet(c.req.param("id")));
     } catch {
@@ -167,12 +209,26 @@ export function createServerApp(
     }
   });
   app.put("/api/spreadsheets/:id", async (c) => {
+    const store = currentStore(c);
+    if (store instanceof Response) return store;
     const body = await c.req.json<Spreadsheet>();
+    const id = c.req.param("id");
+    let current: Spreadsheet | undefined;
+    try {
+      current = await store.getSpreadsheet(id);
+    } catch {
+      current = undefined;
+    }
     return c.json(
-      await store.replaceSpreadsheet({ ...body, id: c.req.param("id") }),
+      await store.replaceSpreadsheet({
+        ...body,
+        id: current?.id ?? body.id ?? id,
+      }),
     );
   });
   app.delete("/api/spreadsheets/:id", async (c) => {
+    const store = currentStore(c);
+    if (store instanceof Response) return store;
     try {
       await store.deleteSpreadsheet(c.req.param("id"));
       return c.json({ deleted: true });
@@ -181,18 +237,21 @@ export function createServerApp(
     }
   });
 
-  app.all("/mcp", async (c) => {
-    const configError = mcpAuthMisconfigured(
-      mcpAuthRequired,
-      mcpAuthToken,
-    );
-    if (configError) return configError;
+  app.get("/files/:id", (c) => {
+    const url = new URL(c.req.url);
+    url.pathname = `/sheet/${encodeURIComponent(c.req.param("id"))}`;
+    return c.redirect(`${url.pathname}${url.search}`, 302);
+  });
 
-    const authResponse = authorizeMcpRequest(
+  app.all("/mcp", async (c) => {
+    const authResponse = await authorizeMcpRequest(
       c.req.raw,
       mcpAuthToken,
+      mcpAllowUnauthenticated,
     );
     if (authResponse) return authResponse;
+    const store = currentStore(c);
+    if (store instanceof Response) return store;
 
     const { createMcpServer } = await import("./mcp.ts");
     const mcp = createMcpServer(store, {
@@ -229,14 +288,39 @@ export function createExcelAppFromEnv(env: ExcelRuntimeEnv = denoEnv()) {
     "http://localhost:8787";
   const token = envValue(env, "TAKOS_STORAGE_ACCESS_TOKEN") ||
     requiredEnv(env, "TAKOS_ACCESS_TOKEN");
-  const spaceId = requiredEnv(env, "TAKOS_SPACE_ID");
-  const client = createTakosStorageClient(apiUrl, token, spaceId);
-  const store = new SpreadsheetStore(client);
-  return createServerApp(store, {
+  const defaultSpaceId = envValue(env, "TAKOS_SPACE_ID");
+  const stores = new Map<string, SpreadsheetStore>();
+  const storeForSpace = (spaceId: string): SpreadsheetStore => {
+    let store = stores.get(spaceId);
+    if (!store) {
+      const client = createTakosStorageClient(apiUrl, token, spaceId);
+      store = new SpreadsheetStore(client);
+      stores.set(spaceId, store);
+    }
+    return store;
+  };
+  const requestSpaceId = (c: Context): string | null =>
+    envValue(
+      {
+        value: c.req.query("space_id") ?? c.req.query("spaceId") ??
+          defaultSpaceId,
+      },
+      "value",
+    ) ?? null;
+  const defaultStore = defaultSpaceId ? storeForSpace(defaultSpaceId) : null;
+  return createServerApp(defaultStore, {
     env,
     nativeRendering: nativeRenderingEnabled(env),
     mcpAuthToken: envValue(env, "MCP_AUTH_TOKEN"),
-    mcpAuthRequired: envFlagEnabled(env, "MCP_AUTH_REQUIRED"),
+    mcpAllowUnauthenticated: envFlagEnabled(
+      env,
+      "MCP_ALLOW_UNAUTHENTICATED",
+    ),
+    storeForRequest: (c) => {
+      const spaceId = requestSpaceId(c);
+      if (!spaceId) return c.json({ error: "space_id is required" }, 400);
+      return storeForSpace(spaceId);
+    },
   });
 }
 
