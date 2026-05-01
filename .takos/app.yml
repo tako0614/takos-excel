@@ -1,9 +1,9 @@
 name: takos-excel
 version: "0.1.0"
 
-publish:
+publications:
   - name: excel-ui
-    type: takos.ui-surface.v1
+    type: publication.http-endpoint@v1
     display:
       title: Excel
       description: Takos spreadsheet editor
@@ -15,7 +15,7 @@ publish:
         kind: url
         routeRef: ui
   - name: excel-mcp
-    type: takos.mcp-server.v1
+    type: publication.mcp-server@v1
     display:
       title: Excel MCP
     outputs:
@@ -28,7 +28,7 @@ publish:
     spec:
       transport: streamable-http
   - name: excel-file-handler
-    type: takos.file-handler.v1
+    type: publication.http-endpoint@v1
     display:
       title: Excel
       description: Open Takos spreadsheet files
@@ -55,9 +55,10 @@ compute:
           scopes:
             - files:read
             - files:write
-        env:
-          endpoint: TAKOS_STORAGE_API_URL
-          apiKey: TAKOS_STORAGE_ACCESS_TOKEN
+        inject:
+          env:
+            endpoint: TAKOS_STORAGE_API_URL
+            apiKey: TAKOS_STORAGE_ACCESS_TOKEN
       - publication: takos.oauth-client
         as: excel-oauth
         request:
@@ -68,12 +69,13 @@ compute:
             - openid
             - profile
             - email
-        env:
-          clientId: OAUTH_CLIENT_ID
-          clientSecret: OAUTH_CLIENT_SECRET
-          issuer: OAUTH_ISSUER_URL
-          tokenEndpoint: OAUTH_TOKEN_URL
-          userinfoEndpoint: OAUTH_USERINFO_URL
+        inject:
+          env:
+            clientId: OAUTH_CLIENT_ID
+            clientSecret: OAUTH_CLIENT_SECRET
+            issuer: OAUTH_ISSUER_URL
+            tokenEndpoint: OAUTH_TOKEN_URL
+            userinfoEndpoint: OAUTH_USERINFO_URL
     build:
       fromWorkflow:
         path: .takos/workflows/deploy.yml

@@ -41,7 +41,10 @@ the `/mcp` endpoint.
 
 The managed worker bundle avoids loading native `npm:canvas` at startup.
 `sheet_screenshot` remains available only in runtimes where the server-side
-canvas renderer can be loaded.
+canvas renderer can be loaded. `src/runtime-capabilities.ts` exports the runtime
+capability manifest consumed by the MCP screenshot tool; unsupported runtimes
+return the manifest's unavailable message without attempting storage or native
+renderer access.
 
 The MCP server requires the following environment variables:
 

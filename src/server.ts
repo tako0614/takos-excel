@@ -9,6 +9,7 @@ import {
   registerAuthRoutes,
   requireAppAuth,
 } from "./app-auth.ts";
+import { createExcelRuntimeCapabilityManifest } from "./runtime-capabilities.ts";
 
 export const EXCEL_MAX_MCP_REQUEST_BYTES = 1_000_000;
 
@@ -255,7 +256,9 @@ export function createServerApp(
 
     const { createMcpServer } = await import("./mcp.ts");
     const mcp = createMcpServer(store, {
-      nativeRendering: options.nativeRendering,
+      runtimeCapabilities: createExcelRuntimeCapabilityManifest({
+        nativeRendering: options.nativeRendering,
+      }),
     });
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,

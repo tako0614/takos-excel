@@ -13,9 +13,15 @@ import {
   MAX_SPREADSHEET_ROWS,
   parseCellAddress,
 } from "./lib/cell-utils.ts";
+import {
+  createExcelRuntimeCapabilityManifest,
+  type ExcelRuntimeCapabilityManifest,
+  excelScreenshotUnavailableMessage,
+} from "./runtime-capabilities.ts";
 
 export type McpServerOptions = {
   nativeRendering?: boolean;
+  runtimeCapabilities?: ExcelRuntimeCapabilityManifest;
 };
 
 type ToolArgs<Shape extends z.ZodRawShape> = z.objectOutputType<
@@ -117,7 +123,10 @@ export function createMcpServer(
   store: SpreadsheetStore,
   options: McpServerOptions = {},
 ): McpServer {
-  const nativeRendering = options.nativeRendering ?? true;
+  const runtimeCapabilities = options.runtimeCapabilities ??
+    createExcelRuntimeCapabilityManifest({
+      nativeRendering: options.nativeRendering ?? true,
+    });
   const mcp = new McpServer({
     name: "takos-excel",
     version: "0.1.0",
@@ -533,12 +542,14 @@ export function createMcpServer(
     },
     async (args) => {
       try {
+        const unavailable = excelScreenshotUnavailableMessage(
+          runtimeCapabilities.screenshot,
+        );
+        if (unavailable) return text(unavailable);
+
         const ss = await store.getSpreadsheet(args.spreadsheetId);
         const sheet = ss.sheets.find((s) => s.id === args.sheetId);
         if (!sheet) return text(`Sheet not found: ${args.sheetId}`);
-        if (!nativeRendering) {
-          return text("sheet_screenshot is unavailable in this runtime");
-        }
         const rendererModule = "./lib/grid-renderer.ts";
         const { renderSheetToBuffer } = await import(
           rendererModule
