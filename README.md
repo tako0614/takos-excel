@@ -79,6 +79,22 @@ spreadsheets use `.takossheet` with `application/vnd.takos.excel+json`; existing
 `takos-excel/*.json` files remain readable and keep the same internal JSON
 layout.
 
+## Takosumi Install
+
+This checkout includes the Takosumi Git project convention under `.takosumi/`:
+
+- `.takosumi/app.yml` is the InstallableApp metadata for Git URL preview/apply.
+- `.takosumi/manifest.yml` is the kernel-bound manifest compiled by
+  `takosumi-git`.
+- `.takosumi/workflows/build.yml` builds `dist/worker.js` and emits the
+  `TAKOSUMI_ARTIFACT=<uri>` marker consumed by `takosumi-git push`.
+
+Preview the install metadata without mutating Accounts or the kernel:
+
+```bash
+takosumi-git install preview --cwd . --json
+```
+
 ## Available MCP Tools
 
 ### Spreadsheet Management

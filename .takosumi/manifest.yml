@@ -1,0 +1,34 @@
+apiVersion: "1.0"
+kind: Manifest
+metadata:
+  name: takos-excel
+  labels:
+    managed-by: takosumi-git
+    takos.app: excel
+imports:
+  - alias: account-auth
+    service: takosumi.account.auth@v1
+    refreshPolicy:
+      kind: ttl
+      ttl: 300s
+resources:
+  - shape: worker@v1
+    name: excel-worker
+    provider: "@takos/cloudflare-worker"
+    spec:
+      bundle: dist/worker.js
+      entrypoint: default
+      routes:
+        - /
+        - /api
+        - /mcp
+        - /files/:id
+      healthcheckPath: /healthz
+      env:
+        APP_AUTH_REQUIRED: "1"
+        MCP_ALLOW_UNAUTHENTICATED: "0"
+    workflowRef:
+      file: build.yml
+      job: build
+      artifact: worker
+      target: spec.bundle

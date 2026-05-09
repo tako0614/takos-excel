@@ -1,0 +1,10 @@
+version: "0"
+jobs:
+  - name: build
+    steps:
+      - name: build-worker
+        run: |
+          deno task build
+          echo "TAKOSUMI_ARTIFACT=dist/worker.js"
+    artifact:
+      name: worker

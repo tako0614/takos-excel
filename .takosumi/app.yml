@@ -1,0 +1,69 @@
+apiVersion: app.takosumi.dev/v1
+kind: InstallableApp
+metadata:
+  id: jp.takos.excel
+  name: Takos Excel
+  description: Spreadsheet editor with formulas and a Streamable HTTP MCP server.
+  publisher: takos
+  homepage: https://github.com/tako0614/takos-excel
+source:
+  git: https://github.com/tako0614/takos-excel.git
+  ref: v0.1.0
+entry:
+  manifest: .takosumi/manifest.yml
+runtime:
+  modes:
+    - shared-cell
+    - dedicated
+    - self-hosted
+bindings:
+  auth:
+    type: identity.oidc@v1
+    required: true
+    redirectPaths:
+      - /api/auth/callback
+    allowedScopes:
+      - openid
+      - profile
+      - email
+  spreadsheets:
+    type: object-store.s3-compatible@v1
+    required: true
+    plan: standard
+    lifecycleDays: 0
+  domain:
+    type: domain.http@v1
+    required: false
+    hostname: auto
+    tlsMode: auto
+  bootstrap:
+    type: install-launch-token@v1
+    required: true
+    consumePath: /api/auth/launch
+    maxLifetimeSeconds: 300
+serviceImports:
+  - binding: account-auth
+    service: takosumi.account.auth@v1
+    alias: account-auth
+    endpointRoles:
+      - oidc-issuer
+      - install-launch
+    refreshPolicy:
+      kind: ttl
+      ttl: 300s
+install:
+  healthcheckPath: /healthz
+  postInstallLaunchPath: /api/auth/launch
+permissions:
+  requested:
+    - app.profile.write
+    - app.memory.write
+    - logs.read.own
+upgrade:
+  policy:
+    securityPatch: ask
+    minor: ask
+    major: manual
+compatibility:
+  takosumi-git: ">=0.4.0"
+  kernel: ">=1.0.0"
