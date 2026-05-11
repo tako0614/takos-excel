@@ -8,7 +8,7 @@ metadata:
   homepage: https://github.com/tako0614/takos-excel
 source:
   git: https://github.com/tako0614/takos-excel.git
-  ref: v0.1.1
+  ref: v0.1.2
 entry:
   manifest: .takosumi/manifest.yml
 runtime:
