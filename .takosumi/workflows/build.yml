@@ -5,6 +5,6 @@ jobs:
       - name: build-worker
         run: |
           deno task build
-          echo "TAKOSUMI_ARTIFACT=dist/worker.js"
+          echo "TAKOSUMI_ARTIFACT=sha256:$(sha256sum dist/worker.js | cut -d ' ' -f 1)"
     artifact:
       name: worker

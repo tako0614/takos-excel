@@ -3,9 +3,9 @@
 A browser-based spreadsheet editor with an MCP (Model Context Protocol) server
 backend. Part of the Takos application suite.
 
-The checked-in `.takos/app.yml` deploys the browser UI and publishes the MCP
-server at `/mcp` on the same Takos worker. The standalone/self-host runtime can
-still be started with `deno task mcp`.
+The checked-in `.takosumi/` packaging deploys the browser UI and exposes the MCP
+server at `/mcp` on the same worker. The standalone/self-host runtime can still
+be started with `deno task mcp`.
 
 ## Tech Stack
 
@@ -64,12 +64,12 @@ The MCP server requires the following environment variables:
 | `MCP_ALLOW_UNAUTHENTICATED`  | Set `1` to allow `/mcp` without a bearer token   | `0`                     |
 | `TAKOS_NATIVE_RENDERING`     | Set `1` to enable native canvas screenshot tools | runtime-dependent       |
 
-In managed Takos deploys, `.takos/app.yml` publishes `excel-mcp` with
-`auth.bearer.secretRef: MCP_AUTH_TOKEN`, injects storage credentials as
-`TAKOS_STORAGE_API_URL` / `TAKOS_STORAGE_ACCESS_TOKEN`, injects the Takos OAuth
-client env, and generates `APP_SESSION_SECRET`. Takos generates the
-`MCP_AUTH_TOKEN` service secret env when it is missing, and MCP clients resolve
-that token from the owner service. Local development can opt into
+In managed Takos installs, `.takosumi/app.yml` declares the install metadata and
+`.takosumi/manifest.yml` exposes `/mcp`. The runtime receives storage
+credentials as `TAKOS_STORAGE_API_URL` / `TAKOS_STORAGE_ACCESS_TOKEN`, injects
+the Takos OAuth client env, and generates `APP_SESSION_SECRET`. Takos generates
+the `MCP_AUTH_TOKEN` service secret env when it is missing, and MCP clients
+resolve that token from the owner service. Local development can opt into
 unauthenticated `/mcp` access with `MCP_ALLOW_UNAUTHENTICATED=true` when no
 token is configured.
 

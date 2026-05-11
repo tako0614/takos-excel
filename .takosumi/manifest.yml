@@ -5,25 +5,20 @@ metadata:
   labels:
     managed-by: takosumi-git
     takos.app: excel
-imports:
-  - alias: account-auth
-    service: takosumi.account.auth@v1
-    refreshPolicy:
-      kind: ttl
-      ttl: 300s
 resources:
   - shape: worker@v1
     name: excel-worker
-    provider: "@takos/cloudflare-worker"
+    provider: "@takos/cloudflare-workers"
     spec:
-      bundle: dist/worker.js
-      entrypoint: default
+      artifact:
+        kind: js-bundle
+        hash: sha256:pending
+      compatibilityDate: "2025-01-01"
       routes:
         - /
         - /api
         - /mcp
         - /files/:id
-      healthcheckPath: /healthz
       env:
         APP_AUTH_REQUIRED: "1"
         MCP_ALLOW_UNAUTHENTICATED: "0"
@@ -31,4 +26,4 @@ resources:
       file: build.yml
       job: build
       artifact: worker
-      target: spec.bundle
+      target: spec.artifact.hash
