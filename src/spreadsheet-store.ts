@@ -1,5 +1,5 @@
 /**
- * SpreadsheetStore backed by the takos platform storage API.
+ * SpreadsheetStore backed by the Takos product storage API.
  *
  * Each spreadsheet is stored under a `/takos-excel/` folder:
  *   - Current file name: `{id}.takossheet`

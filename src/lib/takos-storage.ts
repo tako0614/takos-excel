@@ -1,5 +1,5 @@
 /**
- * Client for the takos platform storage API.
+ * Client for the Takos product storage API.
  *
  * Provides typed access to the spaces.storage endpoints:
  *   GET    /api/spaces/:spaceId/storage              — list files
