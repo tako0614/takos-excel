@@ -55,11 +55,11 @@ The MCP server requires the following environment variables:
 | `TAKOS_SPACE_ID`             | Default space; request `space_id` overrides it   | (optional)              |
 | `APP_AUTH_REQUIRED`          | Set `1` to require app session auth              | `0`                     |
 | `APP_SESSION_SECRET`         | Secret for app session cookies                   | managed generated       |
-| `OAUTH_CLIENT_ID`            | Takos OAuth client ID                            | managed injected        |
-| `OAUTH_CLIENT_SECRET`        | Takos OAuth client secret                        | managed injected        |
-| `OAUTH_ISSUER_URL`           | Takos OAuth issuer URL                           | managed injected        |
-| `OAUTH_TOKEN_URL`            | Takos OAuth token endpoint                       | managed injected        |
-| `OAUTH_USERINFO_URL`         | Takos OAuth userinfo endpoint                    | managed injected        |
+| `OAUTH_CLIENT_ID`            | Takosumi Accounts OIDC client ID                 | managed injected        |
+| `OAUTH_CLIENT_SECRET`        | Takosumi Accounts OIDC client secret             | managed injected        |
+| `OAUTH_ISSUER_URL`           | Takosumi Accounts OIDC issuer URL                | managed injected        |
+| `OAUTH_TOKEN_URL`            | Takosumi Accounts OIDC token endpoint            | managed injected        |
+| `OAUTH_USERINFO_URL`         | Takosumi Accounts OIDC userinfo endpoint         | managed injected        |
 | `MCP_AUTH_TOKEN`             | Bearer token for `/mcp`                          | managed auto-secret     |
 | `MCP_ALLOW_UNAUTHENTICATED`  | Set `1` to allow `/mcp` without a bearer token   | `0`                     |
 | `TAKOS_NATIVE_RENDERING`     | Set `1` to enable native canvas screenshot tools | runtime-dependent       |
@@ -67,9 +67,10 @@ The MCP server requires the following environment variables:
 In managed Takos installs, `.takosumi/app.yml` declares the install metadata and
 `.takosumi/manifest.yml` exposes `/mcp`. The runtime receives storage
 credentials as `TAKOS_STORAGE_API_URL` / `TAKOS_STORAGE_ACCESS_TOKEN`, injects
-the Takos OAuth client env, and generates `APP_SESSION_SECRET`. Takos generates
-the `MCP_AUTH_TOKEN` service secret env when it is missing, and MCP clients
-resolve that token from the owner service. Local development can opt into
+the Takosumi Accounts OIDC client env through the `identity.oidc@v1` AppBinding,
+and generates `APP_SESSION_SECRET`. Takos generates the `MCP_AUTH_TOKEN` service
+secret env when it is missing, and MCP clients resolve that token from the owner
+service. Local development can opt into
 unauthenticated `/mcp` access with `MCP_ALLOW_UNAUTHENTICATED=true` when no
 token is configured.
 
