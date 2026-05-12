@@ -1,7 +1,9 @@
 # takos-excel
 
 A browser-based spreadsheet editor with an MCP (Model Context Protocol) server
-backend. Part of the Takos application suite.
+backend. 1st-party InstallableApp shipped with the Takos distribution —
+auto-installed in new spaces as a user-facing convenience, and uninstallable
+like any other app.
 
 The checked-in `.takosumi/` packaging deploys the browser UI and exposes the MCP
 server at `/mcp` on the same worker. The standalone/self-host runtime can still
@@ -70,9 +72,8 @@ credentials as `TAKOS_STORAGE_API_URL` / `TAKOS_STORAGE_ACCESS_TOKEN`, injects
 the Takosumi Accounts OIDC client env through the `identity.oidc@v1` AppBinding,
 and generates `APP_SESSION_SECRET`. Takos generates the `MCP_AUTH_TOKEN` service
 secret env when it is missing, and MCP clients resolve that token from the owner
-service. Local development can opt into
-unauthenticated `/mcp` access with `MCP_ALLOW_UNAUTHENTICATED=true` when no
-token is configured.
+service. Local development can opt into unauthenticated `/mcp` access with
+`MCP_ALLOW_UNAUTHENTICATED=true` when no token is configured.
 
 The file handler opens `/files/:id` and the app reads/writes storage through the
 `space_id` or `spaceId` request query parameter when present. App-created
