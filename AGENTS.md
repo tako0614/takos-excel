@@ -1,9 +1,9 @@
 # AGENTS.md — takos-excel
 
-`takos-excel` は Takos distribution が ship する **1st-party InstallableApp**
-(新規 space 作成時に auto-install される user-facing convenience)。通常の
-AppInstallation entry として記録され、user は uninstall できる。 spreadsheet
-editing / formula / cell calculation を提供する。
+`takos-excel` は Takos distribution が ship し Takosumi 上で動く **1st-party
+InstallableApp** (新規 space 作成時に auto-install される user-facing
+convenience)。通常の AppInstallation entry として記録され、user は uninstall
+できる。 spreadsheet editing / formula / cell calculation を提供する。
 
 ## 責務
 
@@ -26,8 +26,8 @@ engine app に置き換え可能。
 
 ## 隣接 product との contract
 
-- **Bundled app**: Takos が新規 space 作成時に auto-install する通常
-  AppInstallation
+- **Bundled app**: Takos distribution が新規 space 作成時に Takosumi 上へ
+  auto-install する通常 AppInstallation
 - **Upstream**: Takos public API
 - **Independence**: 独立 product root として管理、 Takos core には吸収しない
 

@@ -1,9 +1,9 @@
 # takos-excel
 
 A browser-based spreadsheet editor with an MCP (Model Context Protocol) server
-backend. 1st-party InstallableApp shipped with the Takos distribution —
-auto-installed in new spaces as a user-facing convenience, and uninstallable
-like any other app.
+backend. It is a 1st-party InstallableApp shipped with the Takos distribution
+and deployed as a normal app on Takosumi: auto-installed in new spaces as a
+user-facing convenience, and uninstallable like any other app.
 
 The checked-in `.takosumi/` packaging deploys the browser UI and exposes the MCP
 server at `/mcp` on the same worker. The standalone/self-host runtime can still
@@ -165,7 +165,7 @@ src/
     conditional-format.ts# Conditional formatting evaluator
     grid-renderer.ts     # Server-side PNG renderer (canvas)
     storage.ts           # Client-side localStorage wrapper
-    takos-storage.ts     # Takos platform storage API client
+    takos-storage.ts     # Takos app integration storage API client
   components/
     Grid.tsx             # Virtual-scrolling spreadsheet grid
     Toolbar.tsx          # Formatting toolbar with undo/redo and CSV import
