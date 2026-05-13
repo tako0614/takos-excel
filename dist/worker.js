@@ -61063,7 +61063,6 @@ function parseCsv(content) {
 // src/spreadsheet-store.ts
 var FOLDER_NAME = "takos-excel";
 var FILE_EXTENSION = ".takossheet";
-var LEGACY_FILE_EXTENSION = ".json";
 var MIME_TYPE = "application/vnd.takos.excel+json";
 var SpreadsheetStore = class {
   client;
@@ -61078,7 +61077,7 @@ var SpreadsheetStore = class {
     return this.cache.get(idOrFileId) ?? [...this.cache.values()].find((entry) => entry.fileId === idOrFileId);
   }
   isSupportedFile(file) {
-    return file.name.endsWith(FILE_EXTENSION) || file.name.endsWith(LEGACY_FILE_EXTENSION) || file.mimeType === MIME_TYPE;
+    return file.name.endsWith(FILE_EXTENSION);
   }
   async loadFile(fileId) {
     const file = await this.client.get(fileId);

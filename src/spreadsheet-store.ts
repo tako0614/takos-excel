@@ -2,8 +2,7 @@
  * SpreadsheetStore backed by the Takos product storage API.
  *
  * Each spreadsheet is stored under a `/takos-excel/` folder:
- *   - Current file name: `{id}.takossheet`
- *   - Legacy file name: `{id}.json`
+ *   - File name: `{id}.takossheet`
  *   - Content: full Spreadsheet object serialised as JSON
  *
  * The store keeps an in-memory cache that is hydrated on first access
@@ -32,7 +31,6 @@ import type { TakosStorageClient } from "./lib/takos-storage.ts";
 
 const FOLDER_NAME = "takos-excel";
 const FILE_EXTENSION = ".takossheet";
-const LEGACY_FILE_EXTENSION = ".json";
 const MIME_TYPE = "application/vnd.takos.excel+json";
 
 // ---------------------------------------------------------------------------
@@ -58,9 +56,7 @@ export class SpreadsheetStore {
   }
 
   private isSupportedFile(file: { name: string; mimeType?: string | null }) {
-    return file.name.endsWith(FILE_EXTENSION) ||
-      file.name.endsWith(LEGACY_FILE_EXTENSION) ||
-      file.mimeType === MIME_TYPE;
+    return file.name.endsWith(FILE_EXTENSION);
   }
 
   private async loadFile(fileId: string): Promise<
