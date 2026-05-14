@@ -28,6 +28,10 @@ const CELL_TEXT = "#111827";
 
 type Ctx = ReturnType<ReturnType<typeof createCanvas>["getContext"]>;
 
+function assertNever(x: never): never {
+  throw new Error(`Unhandled text align: ${JSON.stringify(x)}`);
+}
+
 /**
  * Render a sheet to a PNG buffer.
  */
@@ -257,6 +261,9 @@ function drawCellText(
   const padding = 4;
   let textX: number;
   switch (align) {
+    case "left":
+      textX = x + padding;
+      break;
     case "center":
       textX = x + width / 2;
       break;
@@ -264,7 +271,7 @@ function drawCellText(
       textX = x + width - padding;
       break;
     default:
-      textX = x + padding;
+      assertNever(align);
   }
 
   // Clip to cell bounds
@@ -284,6 +291,9 @@ function drawCellText(
 
     let lineStartX: number;
     switch (align) {
+      case "left":
+        lineStartX = textX;
+        break;
       case "center":
         lineStartX = textX - metrics.width / 2;
         break;
@@ -291,7 +301,7 @@ function drawCellText(
         lineStartX = textX - metrics.width;
         break;
       default:
-        lineStartX = textX;
+        assertNever(align);
     }
 
     ctx.moveTo(lineStartX, underlineY);
