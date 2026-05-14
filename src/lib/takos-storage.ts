@@ -1,3 +1,10 @@
+// CANONICAL COPY: takos-apps/takos-docs/src/lib/takos-storage.ts
+// This file is byte-identical across takos-docs / takos-slide / takos-excel
+// because each takos-app is an independent git repo with no shared-package
+// publishing infra. Edit all three copies together and keep them in sync via
+// `deno task check:takos-apps-dedupe` (ecosystem root). The check is wired
+// into `deno task check:all`.
+
 /**
  * Client for the Takos product storage API.
  *
