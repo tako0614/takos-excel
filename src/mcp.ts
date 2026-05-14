@@ -18,6 +18,12 @@ import {
   type ExcelRuntimeCapabilityManifest,
   excelScreenshotUnavailableMessage,
 } from "./runtime-capabilities.ts";
+import {
+  bytesToBase64,
+  createAppMcpServer,
+  mcpJson as json,
+  mcpText as text,
+} from "./mcp-factory.ts";
 
 export type McpServerOptions = {
   nativeRendering?: boolean;
@@ -42,25 +48,6 @@ function registerTool<Shape extends z.ZodRawShape>(
   cb: ToolHandler<Shape>,
 ) {
   return mcp.tool(name, description, paramsSchema, cb as ToolCallback<Shape>);
-}
-
-function text(s: string) {
-  return { content: [{ type: "text" as const, text: s }] };
-}
-
-function json(v: unknown) {
-  return text(JSON.stringify(v, null, 2));
-}
-
-function bytesToBase64(bytes: Uint8Array): string {
-  const chunkSize = 0x8000;
-  let binary = "";
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(
-      ...bytes.subarray(offset, offset + chunkSize),
-    );
-  }
-  return btoa(binary);
 }
 
 const MAX_ID_LENGTH = 128;
@@ -127,11 +114,18 @@ export function createMcpServer(
     createExcelRuntimeCapabilityManifest({
       nativeRendering: options.nativeRendering ?? true,
     });
-  const mcp = new McpServer({
+  return createAppMcpServer({
     name: "takos-excel",
     version: "0.1.0",
+    registerTools: (mcp) => registerExcelTools(mcp, store, runtimeCapabilities),
   });
+}
 
+function registerExcelTools(
+  mcp: McpServer,
+  store: SpreadsheetStore,
+  runtimeCapabilities: ExcelRuntimeCapabilityManifest,
+): void {
   // -----------------------------------------------------------------------
   // Spreadsheet Management
   // -----------------------------------------------------------------------
@@ -723,6 +717,4 @@ export function createMcpServer(
       return text(await store.exportJson(args.spreadsheetId));
     },
   );
-
-  return mcp;
 }

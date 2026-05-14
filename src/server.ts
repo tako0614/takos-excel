@@ -1,6 +1,5 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { SpreadsheetStore } from "./spreadsheet-store.ts";
 import { createTakosStorageClient } from "./lib/takos-storage.ts";
 import type { Spreadsheet } from "./types/index.ts";
@@ -10,8 +9,14 @@ import {
   requireAppAuth,
 } from "./app-auth.ts";
 import { createExcelRuntimeCapabilityManifest } from "./runtime-capabilities.ts";
+import {
+  createMcpRequestHandler,
+  MAX_MCP_REQUEST_BYTES,
+  mcpAuthMisconfigured,
+} from "./mcp-factory.ts";
+import { createMcpServer } from "./mcp.ts";
 
-export const EXCEL_MAX_MCP_REQUEST_BYTES = 1_000_000;
+export const EXCEL_MAX_MCP_REQUEST_BYTES = MAX_MCP_REQUEST_BYTES;
 
 export type ExcelRuntimeEnv = Record<string, string | undefined>;
 
@@ -39,100 +44,6 @@ function nativeRenderingEnabled(env: ExcelRuntimeEnv): boolean {
 function envFlagEnabled(env: ExcelRuntimeEnv, name: string): boolean {
   const value = envValue(env, name);
   return value ? ["1", "true", "yes"].includes(value.toLowerCase()) : false;
-}
-
-async function constantTimeEqual(
-  left: string,
-  right: string,
-): Promise<boolean> {
-  const [leftDigest, rightDigest] = await Promise.all([
-    crypto.subtle.digest("SHA-256", new TextEncoder().encode(left)),
-    crypto.subtle.digest("SHA-256", new TextEncoder().encode(right)),
-  ]);
-  const leftBytes = new Uint8Array(leftDigest);
-  const rightBytes = new Uint8Array(rightDigest);
-  let diff = leftBytes.length ^ rightBytes.length;
-  for (
-    let index = 0;
-    index < leftBytes.length && index < rightBytes.length;
-    index++
-  ) {
-    diff |= leftBytes[index] ^ rightBytes[index];
-  }
-  return diff === 0;
-}
-
-function mcpAuthMisconfigured(
-  authToken?: string,
-  allowUnauthenticated = false,
-): Response | null {
-  if (authToken || allowUnauthenticated) return null;
-  return new Response(JSON.stringify({ error: "MCP_AUTH_TOKEN is required" }), {
-    status: 503,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
-async function authorizeMcpRequest(
-  request: Request,
-  authToken?: string,
-  allowUnauthenticated = false,
-): Promise<Response | null> {
-  const configError = mcpAuthMisconfigured(authToken, allowUnauthenticated);
-  if (configError) return configError;
-  if (!authToken) return null;
-
-  const header = request.headers.get("Authorization");
-  const token = header?.startsWith("Bearer ") ? header.slice(7) : null;
-  if (!token || !(await constantTimeEqual(token, authToken))) {
-    return new Response(JSON.stringify({ error: "Unauthorized" }), {
-      status: 401,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-  return null;
-}
-
-async function readBoundedJsonRequest(
-  request: Request,
-): Promise<{ request: Request; body: unknown } | Response> {
-  const contentLength = request.headers.get("content-length");
-  if (contentLength && Number(contentLength) > EXCEL_MAX_MCP_REQUEST_BYTES) {
-    return new Response(JSON.stringify({ error: "Request body too large" }), {
-      status: 413,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const raw = await request.text();
-  const byteLength = new TextEncoder().encode(raw).byteLength;
-  if (byteLength > EXCEL_MAX_MCP_REQUEST_BYTES) {
-    return new Response(JSON.stringify({ error: "Request body too large" }), {
-      status: 413,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  let body: unknown;
-  try {
-    body = JSON.parse(raw);
-  } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
-
-  const headers = new Headers(request.headers);
-  headers.set("content-length", String(byteLength));
-  return {
-    request: new Request(request.url, {
-      method: request.method,
-      headers,
-      body: raw,
-    }),
-    body,
-  };
 }
 
 export function createServerApp(
@@ -244,42 +155,22 @@ export function createServerApp(
     return c.redirect(`${url.pathname}${url.search}`, 302);
   });
 
-  app.all("/mcp", async (c) => {
-    const authResponse = await authorizeMcpRequest(
-      c.req.raw,
-      mcpAuthToken,
-      mcpAllowUnauthenticated,
-    );
-    if (authResponse) return authResponse;
+  app.all("/mcp", (c) => {
     const store = currentStore(c);
     if (store instanceof Response) return store;
-
-    const { createMcpServer } = await import("./mcp.ts");
-    const mcp = createMcpServer(store, {
-      runtimeCapabilities: createExcelRuntimeCapabilityManifest({
-        nativeRendering: options.nativeRendering,
-      }),
-    });
-    const transport = new WebStandardStreamableHTTPServerTransport({
-      sessionIdGenerator: undefined,
-    });
-
-    await mcp.connect(transport);
-
-    const response = c.req.raw.method === "POST"
-      ? await (async () => {
-        const bounded = await readBoundedJsonRequest(c.req.raw);
-        if (bounded instanceof Response) return bounded;
-        return transport.handleRequest(bounded.request, {
-          parsedBody: bounded.body,
-        });
-      })()
-      : await transport.handleRequest(c.req.raw);
-
-    if (response) {
-      return response;
-    }
-    return c.json({ error: "No response from MCP" }, 500);
+    const handler = createMcpRequestHandler(
+      () =>
+        createMcpServer(store, {
+          runtimeCapabilities: createExcelRuntimeCapabilityManifest({
+            nativeRendering: options.nativeRendering,
+          }),
+        }),
+      {
+        authToken: mcpAuthToken,
+        allowUnauthenticated: mcpAllowUnauthenticated,
+      },
+    );
+    return handler(c.req.raw);
   });
 
   return app;
