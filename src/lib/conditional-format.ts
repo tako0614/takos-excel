@@ -1,6 +1,10 @@
 import type { CellData, CellFormat, ConditionalRule } from "../types/index.ts";
 import { formatCellAddress, parseCellAddress } from "./cell-utils.ts";
 
+function assertNever(x: never): never {
+  throw new Error(`Unhandled conditional rule type: ${JSON.stringify(x)}`);
+}
+
 /**
  * Parse a range string like "A1:C10" into its start/end column and row.
  */
@@ -61,7 +65,7 @@ function matchesCondition(
       return !isNaN(num) && num >= lo && num <= hi;
     }
     default:
-      return false;
+      return assertNever(condition.type);
   }
 }
 
