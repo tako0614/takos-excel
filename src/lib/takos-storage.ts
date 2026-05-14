@@ -51,8 +51,14 @@ export function createTakosStorageClient(
   const baseUrl = `${apiUrl}/api/spaces/${spaceId}/storage`;
   const filePaths = new Map<string, string>();
 
+  function asRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === "object"
+      ? value as Record<string, unknown>
+      : {};
+  }
+
   function normalizeFile(raw: unknown): StorageFile {
-    const data = raw as Record<string, unknown>;
+    const data = asRecord(raw);
     const file: StorageFile = {
       id: String(data.id),
       name: String(data.name),
@@ -97,7 +103,7 @@ export function createTakosStorageClient(
   }
 
   function fileFromResponse(data: unknown): StorageFile {
-    const record = data as { file?: unknown; folder?: unknown };
+    const record = asRecord(data);
     return normalizeFile(record.file ?? record.folder ?? data);
   }
 
@@ -131,8 +137,14 @@ export function createTakosStorageClient(
   async function list(prefix?: string): Promise<StorageFile[]> {
     const query = prefix ? `?path=${encodeURIComponent(prefix)}` : "";
     const res = await fetchApi(query);
-    const data = await res.json();
-    return ((data.files ?? data) as unknown[]).map(normalizeFile);
+    const data: unknown = await res.json();
+    const envelope = asRecord(data);
+    const raw = Array.isArray(envelope.files)
+      ? envelope.files
+      : Array.isArray(data)
+      ? data
+      : [];
+    return raw.map(normalizeFile);
   }
 
   async function get(fileId: string): Promise<StorageFile | null> {
